@@ -2418,32 +2418,6 @@ static void hdd_remove_passive_channels(struct wiphy *wiphy,
 }
 
 /**
- * hdd_remove_softbank_channels () - remove channel 14
- * @wiphy: Pointer to wireless phy
- * @chan_list: channel list
- * @num_channels: number of channels
- *
- * Return: none
- */
-static void hdd_remove_softbank_channels(struct wiphy *wiphy,
-					uint32_t *chan_list,
-					uint8_t *num_channels)
-{
-	uint8_t num_chan_temp = 0;
-	int i;
-
-	for (i = 0; i < *num_channels; i++) {
-		if (chan_list[i] != 2484) {
-			chan_list[num_chan_temp] = chan_list[i];
-			num_chan_temp++;
-		} else
-			hdd_err("Channel 14 removed from the list");
-	}
-
-	*num_channels = num_chan_temp;
-}
-
-/**
  * __wlan_hdd_cfg80211_extscan_get_valid_channels () - get valid channels
  * @wiphy: Pointer to wireless phy
  * @wdev: Pointer to wireless device
@@ -2540,8 +2514,6 @@ __wlan_hdd_cfg80211_extscan_get_valid_channels(struct wiphy *wiphy,
 	num_channels = QDF_MIN(num_channels, maxChannels);
 
 	hdd_remove_dsrc_channels(wiphy, chan_list, &num_channels);
-
-	hdd_remove_softbank_channels(wiphy, chan_list, &num_channels);
 
 	if ((QDF_SAP_MODE == pAdapter->device_mode) ||
 	    !strncmp(hdd_get_fwpath(), "ap", 2))
