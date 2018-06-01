@@ -8755,8 +8755,7 @@ static int hdd_open_concurrent_interface(hdd_context_t *hdd_ctx, bool rtnl_held)
 {
 	hdd_adapter_t *adapter;
 
-	adapter = hdd_open_adapter(hdd_ctx, QDF_STA_MODE,
-				   hdd_ctx->config->enableConcurrentSTA,
+	adapter = hdd_open_adapter(hdd_ctx, QDF_STA_MODE, "wlan%d",
 				   wlan_hdd_get_intf_addr(hdd_ctx,
 							  QDF_STA_MODE),
 				   NET_NAME_UNKNOWN, rtnl_held);
