@@ -560,7 +560,7 @@ void lim_deactivate_timers(tpAniSirGlobal mac_ctx)
 	if (tx_timer_running(&lim_timer->gLimJoinFailureTimer)) {
 		pe_err("Join failure timer running call the timeout API");
 		/* Cleanup as if join timer expired */
-		lim_process_join_failure_timeout(mac_ctx);
+		lim_timer_handler(mac_ctx, SIR_LIM_JOIN_FAIL_TIMEOUT);
 	}
 	/* Deactivate Join failure timer. */
 	tx_timer_deactivate(&lim_timer->gLimJoinFailureTimer);
@@ -575,18 +575,15 @@ void lim_deactivate_timers(tpAniSirGlobal mac_ctx)
 	if (tx_timer_running(&lim_timer->gLimAssocFailureTimer)) {
 		pe_err("Assoc failure timer running call the timeout API");
 		/* Cleanup as if assoc timer expired */
-		lim_process_assoc_failure_timeout(mac_ctx, LIM_ASSOC);
+		lim_assoc_failure_timer_handler(mac_ctx, LIM_ASSOC);
 	}
 	/* Deactivate Association failure timer. */
 	tx_timer_deactivate(&lim_timer->gLimAssocFailureTimer);
 
-	/* Deactivate Open system auth timer. */
-	tx_timer_deactivate(&lim_timer->open_sys_auth_timer);
-
 	if (tx_timer_running(&mac_ctx->lim.limTimers.gLimAuthFailureTimer)) {
 		pe_err("Auth failure timer running call the timeout API");
 		/* Cleanup as if auth timer expired */
-		lim_process_auth_failure_timeout(mac_ctx);
+		lim_timer_handler(mac_ctx, SIR_LIM_AUTH_FAIL_TIMEOUT);
 	}
 	/* Deactivate Authentication failure timer. */
 	tx_timer_deactivate(&lim_timer->gLimAuthFailureTimer);
@@ -637,6 +634,7 @@ void lim_deactivate_timers(tpAniSirGlobal mac_ctx)
 void lim_cleanup_mlm(tpAniSirGlobal mac_ctx)
 {
 	uint32_t n;
+
 	tLimPreAuthNode **pAuthNode;
 	tLimTimers *lim_timer = NULL;
 
@@ -666,9 +664,6 @@ void lim_cleanup_mlm(tpAniSirGlobal mac_ctx)
 
 		/* Delete Association failure timer. */
 		tx_timer_delete(&lim_timer->gLimAssocFailureTimer);
-
-		/* Delete Open system auth timer. */
-		tx_timer_delete(&lim_timer->open_sys_auth_timer);
 
 		/* Delete Authentication failure timer. */
 		tx_timer_delete(&lim_timer->gLimAuthFailureTimer);
@@ -738,6 +733,7 @@ void lim_cleanup_mlm(tpAniSirGlobal mac_ctx)
 uint8_t lim_is_addr_bc(tSirMacAddr macAddr)
 {
 	int i;
+
 	for (i = 0; i < 6; i++) {
 		if ((macAddr[i] & 0xFF) != 0xFF)
 			return false;
@@ -907,6 +903,7 @@ uint8_t lim_write_deferred_msg_q(tpAniSirGlobal mac_ctx, tpSirMsgQ lim_msg)
 		(LIM_DEFERRED_Q_CHECK_THRESHOLD <
 			mac_ctx->lim.gLimDeferredMsgQ.size)) {
 		uint16_t idx, count = 0;
+
 		for (idx = 0; idx < mac_ctx->lim.gLimDeferredMsgQ.size;
 								idx++) {
 			if (SIR_BB_XPORT_MGMT_MSG ==
@@ -1709,6 +1706,7 @@ lim_decide_sta_protection_on_assoc(tpAniSirGlobal pMac,
 	/* protection related factors other than HT operating mode. Applies to 2.4 GHZ as well as 5 GHZ. */
 	if ((psessionEntry->htCapability) && (pBeaconStruct->HTInfo.present)) {
 		tDot11fIEHTInfo htInfo = pBeaconStruct->HTInfo;
+
 		psessionEntry->beaconParams.fRIFSMode =
 			(uint8_t) htInfo.rifsMode;
 		psessionEntry->beaconParams.llnNonGFCoexist =
@@ -2499,6 +2497,7 @@ void lim_process_quiet_bss_timeout(tpAniSirGlobal mac_ctx)
 void lim_start_quiet_timer(tpAniSirGlobal pMac, uint8_t sessionId)
 {
 	tpPESession psessionEntry;
+
 	psessionEntry = pe_find_session_by_session_id(pMac, sessionId);
 
 	if (psessionEntry == NULL) {
@@ -2761,50 +2760,6 @@ void lim_switch_primary_secondary_channel(tpAniSirGlobal pMac,
 	}
 
 	return;
-}
-
-/**
- * lim_active_scan_allowed()
- *
- ***FUNCTION:
- * Checks if active scans are permitted on the given channel
- *
- ***LOGIC:
- * The config variable SCAN_CONTROL_LIST contains pairs of (channelNum, activeScanAllowed)
- * Need to check if the channelNum matches, then depending on the corresponding
- * scan flag, return true (for activeScanAllowed==1) or false (otherwise).
- *
- ***ASSUMPTIONS:
- *
- ***NOTE:
- *
- * @param  pMac       Pointer to Global MAC structure
- * @param  channelNum channel number
- * @return None
- */
-
-uint8_t lim_active_scan_allowed(tpAniSirGlobal pMac, uint8_t channelNum)
-{
-	uint32_t i;
-	uint8_t channelPair[WNI_CFG_SCAN_CONTROL_LIST_LEN];
-	uint32_t len = WNI_CFG_SCAN_CONTROL_LIST_LEN;
-	if (wlan_cfg_get_str(pMac, WNI_CFG_SCAN_CONTROL_LIST, channelPair, &len)
-	    != eSIR_SUCCESS) {
-		pe_err("Unable to get scan control list");
-		return false;
-	}
-
-	if (len > WNI_CFG_SCAN_CONTROL_LIST_LEN) {
-		pe_err("Invalid scan control list length: %d", len);
-		return false;
-	}
-
-	for (i = 0; (i + 1) < len; i += 2) {
-		if (channelPair[i] == channelNum)
-			return ((channelPair[i + 1] ==
-				 eSIR_ACTIVE_SCAN) ? true : false);
-	}
-	return false;
 }
 
 /**
@@ -4365,6 +4320,7 @@ void lim_update_sta_run_time_ht_switch_chnl_params(tpAniSirGlobal pMac,
 						   tpPESession psessionEntry)
 {
 	uint8_t center_freq = 0;
+	enum phy_ch_width ch_width = CH_WIDTH_20MHZ;
 
 	/* If self capability is set to '20Mhz only', then do not change the CB mode. */
 	if (!lim_get_ht_capability
@@ -4416,12 +4372,15 @@ void lim_update_sta_run_time_ht_switch_chnl_params(tpAniSirGlobal pMac,
 			(uint8_t) pHTInfo->recommendedTxWidthSet;
 		if (eHT_CHANNEL_WIDTH_40MHZ ==
 		    psessionEntry->htRecommendedTxWidthSet) {
+			ch_width = CH_WIDTH_40MHZ;
 			if (PHY_DOUBLE_CHANNEL_LOW_PRIMARY ==
 					pHTInfo->secondaryChannelOffset)
 				center_freq = pHTInfo->primaryChannel + 2;
 			else if (PHY_DOUBLE_CHANNEL_HIGH_PRIMARY ==
 					pHTInfo->secondaryChannelOffset)
 				center_freq = pHTInfo->primaryChannel - 2;
+			else
+				ch_width = CH_WIDTH_20MHZ;
 		}
 
 		/* notify HAL */
@@ -4436,12 +4395,11 @@ void lim_update_sta_run_time_ht_switch_chnl_params(tpAniSirGlobal pMac,
 		pMac->lim.gpchangeChannelCallback = NULL;
 		pMac->lim.gpchangeChannelData = NULL;
 
-		lim_send_switch_chnl_params(pMac, (uint8_t) pHTInfo->primaryChannel,
-					    center_freq, 0,
-					    psessionEntry->htRecommendedTxWidthSet,
-					    psessionEntry->maxTxPower,
-					    psessionEntry->peSessionId,
-					    true);
+		lim_send_switch_chnl_params(pMac,
+				(uint8_t)pHTInfo->primaryChannel,
+				center_freq, 0, ch_width,
+				psessionEntry->maxTxPower,
+				psessionEntry->peSessionId, true);
 
 		/* In case of IBSS, if STA should update HT Info IE in its beacons. */
 		if (LIM_IS_IBSS_ROLE(psessionEntry)) {
@@ -5339,7 +5297,6 @@ tSirNwType lim_get_nw_type(tpAniSirGlobal pMac, uint8_t channelNum, uint32_t typ
 				}
 			}
 			if (pBeacon->extendedRatesPresent) {
-				pe_debug("Beacon, nwtype: G");
 				nwType = eSIR_11G_NW_TYPE;
 			} else if (pBeacon->HTInfo.present ||
 				   IS_BSS_VHT_CAPABLE(pBeacon->VHTCaps)) {
@@ -5347,7 +5304,6 @@ tSirNwType lim_get_nw_type(tpAniSirGlobal pMac, uint8_t channelNum, uint32_t typ
 			}
 		} else {
 			/* 11a packet */
-			pe_debug("Beacon, nwtype: A");
 			nwType = eSIR_11A_NW_TYPE;
 		}
 	}
@@ -5479,6 +5435,7 @@ void lim_handle_heart_beat_timeout_for_session(tpAniSirGlobal mac_ctx,
 uint8_t lim_get_current_operating_channel(tpAniSirGlobal pMac)
 {
 	uint8_t i;
+
 	for (i = 0; i < pMac->lim.maxBssId; i++) {
 		if (pMac->lim.gpSession[i].valid == true) {
 			if ((pMac->lim.gpSession[i].bssType ==
@@ -5700,6 +5657,7 @@ void lim_diag_event_report(tpAniSirGlobal pMac, uint16_t eventType,
 			   uint16_t reasonCode)
 {
 	tSirMacAddr nullBssid = { 0, 0, 0, 0, 0, 0 };
+
 	WLAN_HOST_DIAG_EVENT_DEF(peEvent, host_event_wlan_pe_payload_type);
 
 	qdf_mem_set(&peEvent, sizeof(host_event_wlan_pe_payload_type), 0);
@@ -5894,6 +5852,7 @@ void pe_set_resume_channel(tpAniSirGlobal pMac, uint16_t channel,
 bool lim_is_noa_insert_reqd(tpAniSirGlobal pMac)
 {
 	uint8_t i;
+
 	for (i = 0; i < pMac->lim.maxBssId; i++) {
 		if (pMac->lim.gpSession[i].valid == true) {
 			if ((eLIM_AP_ROLE ==
@@ -6703,9 +6662,14 @@ void lim_del_pmf_sa_query_timer(tpAniSirGlobal mac_ctx, tpPESession pe_session)
 				&pe_session->dph.dphHashTable);
 		if (NULL == sta_ds)
 			continue;
+		if (!sta_ds->rmfEnabled) {
+			pe_debug("no PMF timer for sta-idx:%d assoc-id:%d",
+				 sta_ds->staIndex, sta_ds->assocId);
+			continue;
+		}
 
-		pe_err("Deleting pmfSaQueryTimer for staid: %d",
-			sta_ds->staIndex);
+		pe_debug("Deleting pmfSaQueryTimer for sta-idx:%d assoc-id:%d",
+			sta_ds->staIndex, sta_ds->assocId);
 		tx_timer_deactivate(&sta_ds->pmfSaQueryTimer);
 		tx_timer_delete(&sta_ds->pmfSaQueryTimer);
 	}
@@ -7107,7 +7071,7 @@ bool lim_is_robust_mgmt_action_frame(uint8_t action_category)
 	case SIR_MAC_ACTION_FST:
 		return true;
 	default:
-		pe_warn("non-PMF action category: %d", action_category);
+		pe_debug("non-PMF action category: %d", action_category);
 		break;
 	}
 	return false;
@@ -7180,12 +7144,12 @@ void lim_send_set_dtim_period(tpAniSirGlobal mac_ctx, uint8_t dtim_period,
 	tSirRetStatus ret = eSIR_SUCCESS;
 	tSirMsgQ msg;
 
-	if (session == NULL) {
+	if (!session) {
 		pe_err("Inavalid parameters");
 		return;
 	}
 	dtim_params = qdf_mem_malloc(sizeof(*dtim_params));
-	if (NULL == dtim_params) {
+	if (!dtim_params) {
 		pe_err("Unable to allocate memory");
 		return;
 	}

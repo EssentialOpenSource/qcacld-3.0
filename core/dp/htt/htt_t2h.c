@@ -379,10 +379,12 @@ static void htt_t2h_lp_msg_handler(void *context, qdf_nbuf_t htt_t2h_msg,
 
 		if (pdev->cfg.is_high_latency) {
 			if (!pdev->cfg.default_tx_comp_req) {
+				HTT_TX_MUTEX_ACQUIRE(&pdev->credit_mutex);
 				qdf_atomic_add(credit_delta,
 					       &pdev->htt_tx_credit.
 								target_delta);
 				credit_delta = htt_tx_credit_update(pdev);
+				HTT_TX_MUTEX_RELEASE(&pdev->credit_mutex);
 			}
 			if (credit_delta)
 				ol_tx_target_credit_update(
@@ -421,7 +423,16 @@ static void htt_t2h_lp_msg_handler(void *context, qdf_nbuf_t htt_t2h_msg,
 #ifndef REMOVE_PKT_LOG
 	case HTT_T2H_MSG_TYPE_PKTLOG:
 	{
-		pktlog_process_fw_msg(msg_word + 1);
+		uint32_t len = qdf_nbuf_len(htt_t2h_msg);
+
+		if (len < sizeof(*msg_word) + sizeof(uint32_t)) {
+			qdf_print("%s: invalid nbuff len \n", __func__);
+			WARN_ON(1);
+			break;
+		}
+
+		/*len is reduced by sizeof(*msg_word)*/
+		pktlog_process_fw_msg(msg_word + 1, len - sizeof(*msg_word));
 		break;
 	}
 #endif
@@ -449,9 +460,11 @@ static void htt_t2h_lp_msg_handler(void *context, qdf_nbuf_t htt_t2h_msg,
 
 		if (pdev->cfg.is_high_latency &&
 		    !pdev->cfg.default_tx_comp_req) {
+			HTT_TX_MUTEX_ACQUIRE(&pdev->credit_mutex);
 			qdf_atomic_add(htt_credit_delta,
 				       &pdev->htt_tx_credit.target_delta);
 			htt_credit_delta = htt_tx_credit_update(pdev);
+			HTT_TX_MUTEX_RELEASE(&pdev->credit_mutex);
 		}
 
 		htt_tx_group_credit_process(pdev, msg_word);
@@ -801,10 +814,12 @@ void htt_t2h_msg_handler(void *context, HTC_PACKET *pkt)
 				if (!pdev->cfg.default_tx_comp_req) {
 					int credit_delta;
 
+					HTT_TX_MUTEX_ACQUIRE(&pdev->credit_mutex);
 					qdf_atomic_add(num_msdus,
 						       &pdev->htt_tx_credit.
 							target_delta);
 					credit_delta = htt_tx_credit_update(pdev);
+					HTT_TX_MUTEX_RELEASE(&pdev->credit_mutex);
 
 					if (credit_delta) {
 						ol_tx_target_credit_update(

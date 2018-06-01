@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -615,6 +615,7 @@ void ol_txrx_vdev_unpause(ol_txrx_vdev_handle vdev, uint32_t reason)
 
 	TAILQ_FOREACH(peer, &vdev->peer_list, peer_list_elem) {
 		int i;
+
 		for (i = 0; i < QDF_ARRAY_SIZE(peer->txqs); i++)
 			ol_txrx_peer_tid_unpause_base(pdev, peer, i);
 	}
@@ -1775,9 +1776,11 @@ void ol_txrx_vdev_flush(ol_txrx_vdev_handle vdev)
 		qdf_nbuf_t next =
 			qdf_nbuf_next(vdev->ll_pause.txq.head);
 		qdf_nbuf_set_next(vdev->ll_pause.txq.head, NULL);
-		qdf_nbuf_unmap(vdev->pdev->osdev,
-			       vdev->ll_pause.txq.head,
-			       QDF_DMA_TO_DEVICE);
+		if (QDF_NBUF_CB_PADDR(vdev->ll_pause.txq.head)) {
+			qdf_nbuf_unmap(vdev->pdev->osdev,
+				       vdev->ll_pause.txq.head,
+				       QDF_DMA_TO_DEVICE);
+		}
 		qdf_nbuf_tx_free(vdev->ll_pause.txq.head,
 				 QDF_NBUF_PKT_ERROR);
 		vdev->ll_pause.txq.head = next;
@@ -2213,6 +2216,7 @@ u_int32_t ol_tx_txq_group_credit_limit(
 	for (i = 0; i < OL_TX_MAX_GROUPS_PER_QUEUE; i++) {
 		if (txq->group_ptrs[i]) {
 			int group_credit;
+
 			group_credit = qdf_atomic_read(
 					&txq->group_ptrs[i]->credit);
 			updated_credit = QDF_MIN(updated_credit, group_credit);

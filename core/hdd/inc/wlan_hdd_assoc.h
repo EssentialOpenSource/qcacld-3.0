@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2018 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -175,6 +175,8 @@ struct hdd_conn_flag {
  * @signal: holds rssi info
  * @assoc_status_code: holds assoc fail reason
  * @congestion: holds congestion percentage
+ * @last_ssid: holds last ssid
+ * @last_auth_type: holds last auth type
  */
 typedef struct connection_info_s {
 	eConnectionState connState;
@@ -207,6 +209,8 @@ typedef struct connection_info_s {
 	int8_t signal;
 	int32_t assoc_status_code;
 	uint32_t cca;
+	tCsrSSIDInfo last_ssid;
+	eCsrAuthType last_auth_type;
 } connection_info_t;
 
 /* Forward declarations */
@@ -235,10 +239,19 @@ bool hdd_conn_is_connected(hdd_station_ctx_t *pHddStaCtx);
  * hdd_conn_get_connected_band() - get current connection radio band
  * @pHddStaCtx:    pointer to global HDD Station context
  *
- * Return: eCSR_BAND_24 or eCSR_BAND_5G based on current AP connection
- *      eCSR_BAND_ALL if not connected
+ * Return: SIR_BAND_2_4_GHZ or SIR_BAND_5_GHZ based on current AP connection
+ *      SIR_BAND_ALL if not connected
  */
-eCsrBand hdd_conn_get_connected_band(hdd_station_ctx_t *pHddStaCtx);
+tSirRFBand hdd_conn_get_connected_band(hdd_station_ctx_t *pHddStaCtx);
+
+/**
+ * hdd_get_sta_connection_in_progress() - get STA for which connection
+ *                                        is in progress
+ * @hdd_ctx: hdd context
+ *
+ * Return: hdd adpater for which connection is in progress
+ */
+hdd_adapter_t *hdd_get_sta_connection_in_progress(hdd_context_t *hdd_ctx);
 
 /**
  * hdd_sme_roam_callback() - hdd sme roam callback

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2018 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -135,7 +135,7 @@ static int cds_sched_find_attach_cpu(p_cds_sched_context pSchedContext,
 	int i;
 #endif
 
-	QDF_TRACE(QDF_MODULE_ID_QDF, QDF_TRACE_LEVEL_INFO_LOW,
+	QDF_TRACE(QDF_MODULE_ID_QDF, QDF_TRACE_LEVEL_DEBUG,
 		"%s: num possible cpu %d",
 		__func__, num_possible_cpus());
 
@@ -242,7 +242,7 @@ static int cds_sched_find_attach_cpu(p_cds_sched_context pSchedContext,
 #endif /* WLAN_OPEN_SOURCE */
 	}
 
-	QDF_TRACE(QDF_MODULE_ID_QDF, QDF_TRACE_LEVEL_INFO_LOW,
+	QDF_TRACE(QDF_MODULE_ID_QDF, QDF_TRACE_LEVEL_DEBUG,
 		"%s: NUM PERF CORE %d, HIGH TPUTR REQ %d, RX THRE CPU %lu",
 		__func__, perf_core_count,
 		(int)pSchedContext->high_throughput_required,
@@ -409,7 +409,8 @@ __cds_cpu_hotplug_notify(struct notifier_block *block,
 	if (pref_cpu == 0)
 		return NOTIFY_OK;
 
-	if (!cds_set_cpus_allowed_ptr(pSchedContext->ol_rx_thread, pref_cpu))
+	if (pSchedContext->ol_rx_thread &&
+	    !cds_set_cpus_allowed_ptr(pSchedContext->ol_rx_thread, pref_cpu))
 		affine_cpu = pref_cpu;
 
 	return NOTIFY_OK;
@@ -467,6 +468,7 @@ QDF_STATUS cds_sched_open(void *p_cds_context,
 		uint32_t SchedCtxSize)
 {
 	QDF_STATUS vStatus = QDF_STATUS_SUCCESS;
+
 	QDF_TRACE(QDF_MODULE_ID_QDF, QDF_TRACE_LEVEL_INFO_HIGH,
 		  "%s: Opening the CDS Scheduler", __func__);
 	/* Sanity checks */
@@ -918,6 +920,8 @@ static int cds_mc_thread(void *Arg)
 	qdf_timer_free(&wd_timer);
 
 	complete_and_exit(&pSchedContext->McShutdown, 0);
+
+	return 0;
 } /* cds_mc_thread() */
 
 #ifdef QCA_CONFIG_SMP
@@ -1048,6 +1052,21 @@ cds_indicate_rxpkt(p_cds_sched_context pSchedContext,
 	spin_lock_bh(&pSchedContext->ol_rx_queue_lock);
 	list_add_tail(&pkt->list, &pSchedContext->ol_rx_thread_queue);
 	spin_unlock_bh(&pSchedContext->ol_rx_queue_lock);
+	set_bit(RX_POST_EVENT, &pSchedContext->ol_rx_event_flag);
+	wake_up_interruptible(&pSchedContext->ol_rx_wait_queue);
+}
+
+/**
+ * cds_wakeup_rx_thread() - wakeup rx thread
+ * @Arg: Pointer to the global CDS Sched Context
+ *
+ * This api wake up cds_ol_rx_thread() to process pkt
+ *
+ * Return: none
+ */
+void
+cds_wakeup_rx_thread(p_cds_sched_context pSchedContext)
+{
 	set_bit(RX_POST_EVENT, &pSchedContext->ol_rx_event_flag);
 	wake_up_interruptible(&pSchedContext->ol_rx_wait_queue);
 }
@@ -1215,8 +1234,53 @@ static int cds_ol_rx_thread(void *arg)
 	QDF_TRACE(QDF_MODULE_ID_QDF, QDF_TRACE_LEVEL_DEBUG,
 		  "%s: Exiting CDS OL rx thread", __func__);
 	complete_and_exit(&pSchedContext->ol_rx_shutdown, 0);
+
+	return 0;
 }
 #endif
+
+void cds_remove_timer_from_sys_msg(uint32_t timer_cookie)
+{
+	p_cds_msg_wrapper msg_wrapper = NULL;
+	struct list_head *pos, *q;
+	unsigned long flags;
+	p_cds_mq_type sys_msgq;
+
+	if (!gp_cds_sched_context) {
+		cds_err("gp_cds_sched_context is null");
+		return;
+	}
+
+	if (!gp_cds_sched_context->McThread) {
+		cds_err("Cannot post message because MC thread is stopped");
+		return;
+	}
+
+	sys_msgq = &gp_cds_sched_context->sysMcMq;
+	/* No msg present in sys queue */
+	if (cds_is_mq_empty(sys_msgq))
+		return;
+
+	spin_lock_irqsave(&sys_msgq->mqLock, flags);
+	list_for_each_safe(pos, q, &sys_msgq->mqList) {
+		msg_wrapper = list_entry(pos, cds_msg_wrapper, msgNode);
+
+		if ((msg_wrapper->pVosMsg->type == SYS_MSG_ID_MC_TIMER) &&
+		    (msg_wrapper->pVosMsg->bodyval == timer_cookie)) {
+			/* return message to the Core */
+			list_del(pos);
+			spin_unlock_irqrestore(&sys_msgq->mqLock, flags);
+			QDF_TRACE(QDF_MODULE_ID_QDF, QDF_TRACE_LEVEL_DEBUG,
+				  "%s: removing timer message with cookie %d",
+				  __func__, timer_cookie);
+			cds_core_return_msg(gp_cds_sched_context->pVContext,
+					    msg_wrapper);
+			return;
+		}
+
+	}
+	spin_unlock_irqrestore(&sys_msgq->mqLock, flags);
+}
 
 /**
  * cds_sched_close() - close the cds scheduler
@@ -1712,7 +1776,7 @@ bool cds_wait_for_external_threads_completion(const char *caller_func)
 				  "%s: Waiting for %d active entry points to exit",
 				  __func__, r);
 			msleep(SSR_WAIT_SLEEP_TIME);
-			if (count == (MAX_SSR_WAIT_ITERATIONS/2)) {
+			if (count & 0x1) {
 				QDF_TRACE(QDF_MODULE_ID_QDF,
 					QDF_TRACE_LEVEL_ERROR,
 					"%s: in middle of waiting for active entry points:",

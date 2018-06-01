@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -597,19 +597,19 @@ hdd_parse_get_ibss_peer_info(uint8_t *pValue, struct qdf_mac_addr *pPeerMacAddr)
 
 static void hdd_get_band_helper(hdd_context_t *hdd_ctx, int *pBand)
 {
-	eCsrBand band = -1;
+	tSirRFBand band = SIR_BAND_UNKNOWN;
 
 	sme_get_freq_band((tHalHandle) (hdd_ctx->hHal), &band);
 	switch (band) {
-	case eCSR_BAND_ALL:
+	case SIR_BAND_ALL:
 		*pBand = WLAN_HDD_UI_BAND_AUTO;
 		break;
 
-	case eCSR_BAND_24:
+	case SIR_BAND_2_4_GHZ:
 		*pBand = WLAN_HDD_UI_BAND_2_4_GHZ;
 		break;
 
-	case eCSR_BAND_5G:
+	case SIR_BAND_5_GHZ:
 		*pBand = WLAN_HDD_UI_BAND_5_GHZ;
 		break;
 
@@ -853,56 +853,17 @@ static int hdd_parse_reassoc_command_v1_data(const uint8_t *pValue,
 void hdd_wma_send_fastreassoc_cmd(hdd_adapter_t *adapter,
 				const tSirMacAddr bssid, int channel)
 {
-	QDF_STATUS status;
 	hdd_wext_state_t *wext_state = WLAN_HDD_GET_WEXT_STATE_PTR(adapter);
 	hdd_station_ctx_t *hdd_sta_ctx = WLAN_HDD_GET_STATION_CTX_PTR(adapter);
+
 	tCsrRoamProfile *profile = &wext_state->roamProfile;
-	tSirMacAddr connected_bssid = {0};
-	struct wma_roam_invoke_cmd *fastreassoc;
-	cds_msg_t msg = {0};
+	tSirMacAddr connected_bssid;
 
-	fastreassoc = qdf_mem_malloc(sizeof(*fastreassoc));
-	if (NULL == fastreassoc) {
-		hdd_err("qdf_mem_malloc failed for fastreassoc");
-		return;
-	}
-	if (hdd_sta_ctx) {
-		qdf_mem_copy(connected_bssid,
-			     hdd_sta_ctx->conn_info.bssId.bytes, ETH_ALEN);
-		/* if both are same then set the flag */
-		if (!qdf_mem_cmp(connected_bssid, bssid, ETH_ALEN)) {
-			fastreassoc->is_same_bssid = true;
-			hdd_debug("bssid same, bssid[%pM]", bssid);
-		}
-	}
-	fastreassoc->vdev_id = adapter->sessionId;
-	fastreassoc->bssid[0] = bssid[0];
-	fastreassoc->bssid[1] = bssid[1];
-	fastreassoc->bssid[2] = bssid[2];
-	fastreassoc->bssid[3] = bssid[3];
-	fastreassoc->bssid[4] = bssid[4];
-	fastreassoc->bssid[5] = bssid[5];
-
-	status = sme_get_beacon_frm(WLAN_HDD_GET_HAL_CTX(adapter), profile,
-						bssid, &fastreassoc->frame_buf,
-						&fastreassoc->frame_len,
-						&channel);
-
-	fastreassoc->channel = channel;
-	if (QDF_STATUS_SUCCESS != status) {
-		hdd_warn("sme_get_beacon_frm failed");
-		fastreassoc->frame_buf = NULL;
-		fastreassoc->frame_len = 0;
-	}
-
-	msg.type = SIR_HAL_ROAM_INVOKE;
-	msg.reserved = 0;
-	msg.bodyptr = fastreassoc;
-	status = cds_mq_post_message(QDF_MODULE_ID_WMA, &msg);
-	if (QDF_STATUS_SUCCESS != status) {
-		hdd_err("Not able to post ROAM_INVOKE_CMD message to WMA");
-		qdf_mem_free(fastreassoc);
-	}
+	qdf_mem_copy(connected_bssid, hdd_sta_ctx->conn_info.bssId.bytes,
+		     ETH_ALEN);
+	sme_fast_reassoc(WLAN_HDD_GET_HAL_CTX(adapter),
+			 profile, bssid, channel, adapter->sessionId,
+			 connected_bssid);
 }
 #endif
 
@@ -2312,7 +2273,7 @@ static int hdd_get_dwell_time(struct hdd_config *pCfg, uint8_t *command,
 				 (int)pCfg->nPassiveMinChnTime);
 		return 0;
 	} else if (strncmp(command, "GETDWELLTIME", 12) == 0) {
-		*len = scnprintf(extra, n, "GETDWELLTIME %u \n",
+		*len = scnprintf(extra, n, "GETDWELLTIME %u\n",
 				 (int)pCfg->nActiveMaxChnTime);
 		return 0;
 	}
@@ -3044,8 +3005,18 @@ static int drv_cmd_country(hdd_adapter_t *adapter,
 	QDF_STATUS status;
 	unsigned long rc;
 	char *country_code;
+	int32_t cc_from_db;
 
 	country_code = command + 8;
+	if (!((country_code[0] == 'X' && country_code[1] == 'X') ||
+	    (country_code[0] == '0' && country_code[1] == '0'))) {
+		cc_from_db = cds_get_country_from_alpha2(country_code);
+		if (cc_from_db == CTRY_DEFAULT) {
+			hdd_err("Invalid country code: %c%c",
+				country_code[0], country_code[1]);
+			return -EINVAL;
+		}
+	}
 
 	INIT_COMPLETION(adapter->change_country_code);
 
@@ -3338,11 +3309,6 @@ static int drv_cmd_set_roam_mode(hdd_adapter_t *adapter,
 	int ret = 0;
 	uint8_t *value = command;
 	uint8_t roamMode = CFG_LFR_FEATURE_ENABLED_DEFAULT;
-
-	if (!adapter->fast_roaming_allowed) {
-		hdd_err("Roaming is always disabled on this interface");
-		goto exit;
-	}
 
 	/* Move pointer to ahead of SETROAMMODE<delimiter> */
 	value = value + SIZE_OF_SETROAMMODE + 1;
@@ -4380,11 +4346,6 @@ static int drv_cmd_set_fast_roam(hdd_adapter_t *adapter,
 	int ret = 0;
 	uint8_t *value = command;
 	uint8_t lfrMode = CFG_LFR_FEATURE_ENABLED_DEFAULT;
-
-	if (!adapter->fast_roaming_allowed) {
-		hdd_err("Roaming is always disabled on this interface");
-		goto exit;
-	}
 
 	/* Move pointer to ahead of SETFASTROAM<delimiter> */
 	value = value + command_len + 1;
@@ -5725,12 +5686,6 @@ static int drv_cmd_set_ccx_mode(hdd_adapter_t *adapter,
 		goto exit;
 	}
 
-	if (!adapter->fast_roaming_allowed) {
-		hdd_warn("Fast roaming is not allowed on this device hence this operation is not permitted!");
-		ret = -EPERM;
-		goto exit;
-	}
-
 	/* Move pointer to ahead of SETCCXMODE<delimiter> */
 	value = value + command_len + 1;
 
@@ -7037,13 +6992,18 @@ static int hdd_drv_cmd_process(hdd_adapter_t *adapter,
 	const int cmd_num_total = ARRAY_SIZE(hdd_drv_cmds);
 	uint8_t *cmd_i = NULL;
 	hdd_drv_cmd_handler_t handler = NULL;
-	int len = 0;
+	int len = 0, cmd_len = 0;
+	uint8_t *ptr;
 	bool args;
 
 	if (!adapter || !cmd || !priv_data) {
 		hdd_err("at least 1 param is NULL");
 		return -EINVAL;
 	}
+
+	/* Calculate length of the first word */
+	ptr = strchrnul(cmd, ' ');
+	cmd_len = ptr - cmd;
 
 	hdd_ctx = (hdd_context_t *)adapter->pHddCtx;
 
@@ -7059,7 +7019,7 @@ static int hdd_drv_cmd_process(hdd_adapter_t *adapter,
 			return -EINVAL;
 		}
 
-		if (strncasecmp(cmd, cmd_i, len) == 0) {
+		if (len == cmd_len && strncasecmp(cmd, cmd_i, len) == 0) {
 			if (args && drv_cmd_validate(cmd, len))
 				return -EINVAL;
 

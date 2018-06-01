@@ -25,7 +25,7 @@ endif # opensource
 
 # DLKM_DIR was moved for JELLY_BEAN (PLATFORM_SDK 16)
 ifeq ($(call is-platform-sdk-version-at-least,16),true)
-	DLKM_DIR := $(TOP)/device/essential/mata/dlkm
+	DLKM_DIR := $(TOP)/device/qcom/common/dlkm
 else
 	DLKM_DIR := build/dlkm
 endif # platform-sdk-version

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -72,6 +72,7 @@ ap_beacon_process_5_ghz(tpAniSirGlobal mac_ctx, uint8_t *rx_pkt_info,
 			uint32_t phy_mode)
 {
 	tpSirMacMgmtHdr mac_hdr = WMA_GET_RX_MAC_HEADER(rx_pkt_info);
+
 	if (!session->htCapability)
 		return;
 
@@ -393,10 +394,9 @@ sch_bcn_process_sta(tpAniSirGlobal mac_ctx,
 	beaconParams->bssIdx = *bssIdx;
 	qdf_mem_copy((uint8_t *) &session->lastBeaconTimeStamp,
 			(uint8_t *) bcn->timeStamp, sizeof(uint64_t));
-	session->lastBeaconDtimCount = bcn->tim.dtimCount;
 	session->currentBssBeaconCnt++;
-	if (session->lastBeaconDtimPeriod != bcn->tim.dtimPeriod) {
-		session->lastBeaconDtimPeriod = bcn->tim.dtimPeriod;
+	if (session->bcon_dtim_period != bcn->tim.dtimPeriod) {
+		session->bcon_dtim_period = bcn->tim.dtimPeriod;
 		lim_send_set_dtim_period(mac_ctx, bcn->tim.dtimPeriod,
 				session);
 	}
@@ -761,6 +761,7 @@ static void __sch_beacon_process_for_session(tpAniSirGlobal mac_ctx,
 	uint8_t sendProbeReq = false;
 	tpSirMacMgmtHdr pMh = WMA_GET_RX_MAC_HEADER(rx_pkt_info);
 	int8_t regMax = 0, maxTxPower = 0, local_constraint;
+
 	qdf_mem_zero(&beaconParams, sizeof(tUpdateBeaconParams));
 	beaconParams.paramChangeBitmap = 0;
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -159,7 +159,7 @@ enum hdd_wlan_get_peer_rssi_source {
 };
 
 /** Maximum Length of WPA/RSN IE */
-#define MAX_WPA_RSN_IE_LEN 40
+#define MAX_WPA_RSN_IE_LEN 255
 
 /** Enable 11d */
 #define ENABLE_11D  1
@@ -345,7 +345,7 @@ extern int iw_set_essid(struct net_device *dev,
 
 extern int iw_get_essid(struct net_device *dev,
 			struct iw_request_info *info,
-			struct iw_point *dwrq, char *extra);
+			union iwreq_data *dwrq, char *extra);
 
 extern int iw_set_ap_address(struct net_device *dev,
 			     struct iw_request_info *info,

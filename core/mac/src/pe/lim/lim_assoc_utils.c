@@ -863,7 +863,7 @@ void
 lim_reject_association(tpAniSirGlobal mac_ctx, tSirMacAddr peer_addr,
 			uint8_t sub_type, uint8_t add_pre_auth_context,
 			tAniAuthType auth_type, uint16_t sta_id,
-			uint8_t delete_sta, tSirResultCodes result_code,
+			uint8_t delete_sta, enum eSirMacStatusCodes result_code,
 			tpPESession session_entry)
 {
 	tpDphHashNode sta_ds;
@@ -1644,6 +1644,7 @@ lim_populate_peer_rate_set(tpAniSirGlobal pMac,
 	tSirMacRateSet tempRateSet;
 	tSirMacRateSet tempRateSet2;
 	uint32_t i, j, val, min, isArate;
+
 	isArate = 0;
 
 	/* copy operational rate set from psessionEntry */
@@ -1692,6 +1693,7 @@ lim_populate_peer_rate_set(tpAniSirGlobal pMac,
 	{
 		uint8_t aRateIndex = 0;
 		uint8_t bRateIndex = 0;
+
 		qdf_mem_set((uint8_t *) pRates, sizeof(tSirSupportedRates), 0);
 		for (i = 0; i < tempRateSet.numRates; i++) {
 			min = 0;
@@ -2948,7 +2950,6 @@ void lim_handle_cnf_wait_timeout(tpAniSirGlobal pMac, uint16_t staId)
 					       true,
 					       pStaDs->mlmStaContext.authType,
 					       pStaDs->assocId, true,
-					       (tSirResultCodes)
 					       eSIR_MAC_UNSPEC_FAILURE_STATUS,
 					       psessionEntry);
 		}
@@ -3044,7 +3045,11 @@ lim_delete_dph_hash_entry(tpAniSirGlobal mac_ctx, tSirMacAddr sta_addr,
 					       session_entry);
 		}
 #ifdef WLAN_FEATURE_11W
-		tx_timer_delete(&sta_ds->pmfSaQueryTimer);
+		if (sta_ds->rmfEnabled) {
+			pe_debug("delete pmf timer sta-idx:%d assoc-id:%d",
+				 sta_ds->staIndex, sta_ds->assocId);
+			tx_timer_delete(&sta_ds->pmfSaQueryTimer);
+		}
 #endif
 	}
 
@@ -4543,6 +4548,7 @@ void lim_init_pre_auth_timer_table(tpAniSirGlobal pMac,
 {
 	uint32_t cfgValue;
 	uint32_t authNodeIdx;
+
 	tLimPreAuthNode **pAuthNode = pPreAuthTimerTable->pTable;
 
 	/* Get AUTH_RSP Timers value */
@@ -4581,6 +4587,7 @@ tLimPreAuthNode *lim_acquire_free_pre_auth_node(tpAniSirGlobal pMac,
 {
 	uint32_t i;
 	tLimPreAuthNode **pTempNode = pPreAuthTimerTable->pTable;
+
 	for (i = 0; i < pPreAuthTimerTable->numEntry; i++) {
 		if (pTempNode[i]->fFree == 1) {
 			pTempNode[i]->fFree = 0;

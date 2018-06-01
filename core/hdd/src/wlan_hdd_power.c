@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -661,13 +661,8 @@ void hdd_conf_hostoffload(hdd_adapter_t *pAdapter, bool fenable)
 	}
 
 	/* Configure DTIM hardware filter rules */
-	{
-		enum hw_filter_mode mode = pHddCtx->config->hw_filter_mode;
-
-		if (!fenable)
-			mode = HW_FILTER_DISABLED;
-		hdd_conf_hw_filter_mode(pAdapter, mode);
-	}
+	hdd_conf_hw_filter_mode(pAdapter, pHddCtx->config->hw_filter_mode,
+				fenable);
 
 	EXIT();
 }
@@ -1057,7 +1052,8 @@ QDF_STATUS hdd_conf_arp_offload(hdd_adapter_t *pAdapter, bool fenable)
 	return QDF_STATUS_SUCCESS;
 }
 
-int hdd_conf_hw_filter_mode(hdd_adapter_t *adapter, enum hw_filter_mode mode)
+int hdd_conf_hw_filter_mode(hdd_adapter_t *adapter, enum hw_filter_mode mode,
+			    bool filter_enable)
 {
 	QDF_STATUS status;
 
@@ -1067,7 +1063,8 @@ int hdd_conf_hw_filter_mode(hdd_adapter_t *adapter, enum hw_filter_mode mode)
 	}
 
 	status = sme_conf_hw_filter_mode(WLAN_HDD_GET_HAL_CTX(adapter),
-					 adapter->sessionId, mode);
+					 adapter->sessionId, mode,
+					 filter_enable);
 
 	return qdf_status_to_os_return(status);
 }
@@ -1433,7 +1430,6 @@ QDF_STATUS hdd_wlan_shutdown(void)
 	v_CONTEXT_t p_cds_context = NULL;
 	hdd_context_t *pHddCtx;
 	p_cds_sched_context cds_sched_context = NULL;
-	QDF_STATUS qdf_status;
 
 	hdd_info("WLAN driver shutting down!");
 
@@ -1470,6 +1466,7 @@ QDF_STATUS hdd_wlan_shutdown(void)
 	if (true == pHddCtx->isMcThreadSuspended) {
 		complete(&cds_sched_context->ResumeMcEvent);
 		pHddCtx->isMcThreadSuspended = false;
+		pHddCtx->isWiphySuspended = false;
 	}
 #ifdef QCA_CONFIG_SMP
 	if (true == pHddCtx->is_ol_rx_thread_suspended) {
@@ -1478,11 +1475,6 @@ QDF_STATUS hdd_wlan_shutdown(void)
 	}
 #endif
 
-	qdf_status = cds_sched_close(p_cds_context);
-	if (!QDF_IS_STATUS_SUCCESS(qdf_status)) {
-		hdd_err("Failed to close CDS Scheduler");
-		QDF_ASSERT(false);
-	}
 	hdd_ipa_uc_ssr_deinit();
 
 	qdf_mc_timer_stop(&pHddCtx->tdls_source_timer);
@@ -1539,7 +1531,8 @@ static void hdd_send_default_scan_ies(hdd_context_t *hdd_ctx)
 		adapter = adapter_node->pAdapter;
 		if (hdd_is_interface_up(adapter) &&
 		    (adapter->device_mode == QDF_STA_MODE ||
-		    adapter->device_mode == QDF_P2P_DEVICE_MODE)) {
+		    adapter->device_mode == QDF_P2P_DEVICE_MODE) &&
+		    adapter->scan_info.default_scan_ies) {
 			sme_set_default_scan_ie(hdd_ctx->hHal,
 				      adapter->sessionId,
 				      adapter->scan_info.default_scan_ies,
@@ -1585,20 +1578,9 @@ QDF_STATUS hdd_wlan_re_init(void)
 	}
 	bug_on_reinit_failure = pHddCtx->config->bug_on_reinit_failure;
 
-	/* Try to get an adapter from mode ID */
-	pAdapter = hdd_get_adapter(pHddCtx, QDF_STA_MODE);
-	if (!pAdapter) {
-		pAdapter = hdd_get_adapter(pHddCtx, QDF_SAP_MODE);
-		if (!pAdapter) {
-			pAdapter = hdd_get_adapter(pHddCtx, QDF_IBSS_MODE);
-			if (!pAdapter) {
-				pAdapter = hdd_get_adapter(pHddCtx,
-							   QDF_MONITOR_MODE);
-				if (!pAdapter)
-					hdd_err("Failed to get adapter");
-			}
-		}
-	}
+	pAdapter = hdd_get_first_valid_adapter();
+	if (!pAdapter)
+		hdd_err("Failed to get adapter");
 
 	if (pHddCtx->config->enable_dp_trace)
 		hdd_dp_trace_init(pHddCtx->config);
@@ -1632,12 +1614,6 @@ QDF_STATUS hdd_wlan_re_init(void)
 	/* Allow the phone to go to sleep */
 	hdd_allow_suspend(WIFI_POWER_EVENT_WAKELOCK_DRIVER_REINIT);
 
-	ret = hdd_register_cb(pHddCtx);
-	if (ret) {
-		hdd_err("Failed to register HDD callbacks!");
-		goto err_cds_disable;
-	}
-
 	/* set chip power save failure detected callback */
 	sme_set_chip_pwr_save_fail_cb(pHddCtx->hHal,
 				      hdd_chip_pwr_save_fail_detected_cb);
@@ -1645,9 +1621,6 @@ QDF_STATUS hdd_wlan_re_init(void)
 	hdd_send_default_scan_ies(pHddCtx);
 	hdd_info("WLAN host driver reinitiation completed!");
 	goto success;
-
-err_cds_disable:
-	hdd_wlan_stop_modules(pHddCtx, false);
 
 err_re_init:
 	/* Allow the phone to go to sleep */
@@ -1755,6 +1728,20 @@ void wlan_hdd_inc_suspend_stats(hdd_context_t *hdd_ctx,
 	wlan_hdd_print_suspend_fail_stats(hdd_ctx);
 }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 12, 0)
+static inline void
+hdd_sched_scan_results(struct wiphy *wiphy, uint64_t reqid)
+{
+	cfg80211_sched_scan_results(wiphy);
+}
+#else
+static inline void
+hdd_sched_scan_results(struct wiphy *wiphy, uint64_t reqid)
+{
+	cfg80211_sched_scan_results(wiphy, reqid);
+}
+#endif
+
 /**
  * __wlan_hdd_cfg80211_resume_wlan() - cfg80211 resume callback
  * @wiphy: Pointer to wiphy
@@ -1851,7 +1838,7 @@ static int __wlan_hdd_cfg80211_resume_wlan(struct wiphy *wiphy)
 				hdd_prevent_suspend_timeout(
 					HDD_WAKELOCK_TIMEOUT_RESUME,
 					WIFI_POWER_EVENT_WAKELOCK_RESUME_WLAN);
-				cfg80211_sched_scan_results(pHddCtx->wiphy);
+				hdd_sched_scan_results(pHddCtx->wiphy, 0);
 			}
 
 			hdd_debug("cfg80211 scan result database updated");
@@ -2151,7 +2138,7 @@ static void hdd_stop_dhcp_ind(hdd_adapter_t *adapter)
 			  adapter->macAddressCurrent.bytes,
 			  adapter->sessionId);
 	hdd_allow_suspend(WIFI_POWER_EVENT_WAKELOCK_DHCP);
-	qdf_runtime_pm_allow_suspend(&adapter->connect_rpm_ctx.connect);
+	qdf_runtime_pm_allow_suspend(&hdd_ctx->runtime_context.connect);
 }
 
 /**
@@ -2168,7 +2155,7 @@ static void hdd_start_dhcp_ind(hdd_adapter_t *adapter)
 	hdd_context_t *hdd_ctx = WLAN_HDD_GET_CTX(adapter);
 
 	hdd_debug("DHCP start indicated through power save");
-	qdf_runtime_pm_prevent_suspend(&adapter->connect_rpm_ctx.connect);
+	qdf_runtime_pm_prevent_suspend(&hdd_ctx->runtime_context.connect);
 	hdd_prevent_suspend_timeout(HDD_WAKELOCK_TIMEOUT_CONNECT,
 				    WIFI_POWER_EVENT_WAKELOCK_DHCP);
 	sme_dhcp_start_ind(hdd_ctx->hHal, adapter->device_mode,

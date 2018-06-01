@@ -44,7 +44,6 @@
    Include Files
    ------------------------------------------------------------------------*/
 #include "qdf_types.h"
-#include "cds_pack_align.h"
 #include "i_host_diag_core_event.h"
 
 /*--------------------------------------------------------------------------
@@ -184,23 +183,6 @@ typedef struct {
 	char driverVersion[10];
 } host_event_wlan_bringup_status_payload_type;
 
-CDS_PACK_START
-/*-------------------------------------------------------------------------
-   Event ID: EVENT_WLAN_POWERSAVE_GENERIC
-   ------------------------------------------------------------------------*/
-typedef CDS_PACK_PRE struct {
-	uint8_t event_subtype;
-	uint8_t full_power_request_reason;
-	uint8_t pmc_current_state;
-	uint8_t enable_disable_powersave_mode;
-	uint8_t winmob_d_power_state;
-	uint8_t dtim_period;
-	uint16_t final_listen_intv;
-	uint16_t bmps_auto_timer_duration;
-	uint16_t bmps_period;
-} CDS_PACK_POST host_event_wlan_powersave_payload_type;
-
-CDS_PACK_END
 /*-------------------------------------------------------------------------
    Event ID: EVENT_WLAN_POWERSAVE_WOW
    ------------------------------------------------------------------------*/
@@ -623,6 +605,7 @@ enum wifi_connectivity_events {
  * @WIFI_POWER_EVENT_WAKELOCK_DHCP: DHCP negotiation under way
  * @WIFI_POWER_EVENT_WAKELOCK_MGMT_TX: MGMT Tx wake lock
  * @WIFI_POWER_EVENT_WAKELOCK_CONNECT: connection in progress
+ * @WIFI_POWER_EVENT_WAKELOCK_IFACE_CHANGE_TIMER: iface change timer running
  * @WIFI_POWER_EVENT_WAKELOCK_MONITOR_MODE: Montitor mode wakelock
  *
  * Indicates the reason for which the wakelock was taken/released
@@ -649,6 +632,7 @@ enum wake_lock_reason {
 	WIFI_POWER_EVENT_WAKELOCK_DHCP,
 	WIFI_POWER_EVENT_WAKELOCK_MGMT_TX,
 	WIFI_POWER_EVENT_WAKELOCK_CONNECT,
+	WIFI_POWER_EVENT_WAKELOCK_IFACE_CHANGE_TIMER,
 	WIFI_POWER_EVENT_WAKELOCK_MONITOR_MODE,
 };
 

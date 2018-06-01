@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2018 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -1062,8 +1062,9 @@ bool lim_process_fils_auth_frame2(tpAniSirGlobal mac_ctx,
 		tpPESession pe_session,
 		tSirMacAuthFrameBody *rx_auth_frm_body)
 {
-	bool pmkid_found = false;
 	int i;
+	uint32_t ret;
+	bool pmkid_found = false;
 	tDot11fIERSN dot11f_ie_rsn = {0};
 
 	if (rx_auth_frm_body->authAlgoNumber != eSIR_FILS_SK_WITHOUT_PFS)
@@ -1072,10 +1073,14 @@ bool lim_process_fils_auth_frame2(tpAniSirGlobal mac_ctx,
 	if (!pe_session->fils_info)
 		return false;
 
-	dot11f_unpack_ie_rsn(mac_ctx,
-				&rx_auth_frm_body->rsn_ie.info[0],
-				rx_auth_frm_body->rsn_ie.length,
-				&dot11f_ie_rsn, 0);
+	ret = dot11f_unpack_ie_rsn(mac_ctx,
+				   &rx_auth_frm_body->rsn_ie.info[0],
+				   rx_auth_frm_body->rsn_ie.length,
+				   &dot11f_ie_rsn, 0);
+	if (!DOT11F_SUCCEEDED(ret)) {
+		pe_err("unpack failed, ret: %d", ret);
+		return false;
+	}
 
 	for (i = 0; i < dot11f_ie_rsn.pmkid_count; i++) {
 		if (qdf_mem_cmp(dot11f_ie_rsn.pmkid[i],
@@ -1131,6 +1136,12 @@ void lim_update_fils_config(tpPESession session,
 	csr_fils_info->akm = fils_config_info->akm_type;
 	csr_fils_info->auth = fils_config_info->auth_type;
 	csr_fils_info->sequence_number = fils_config_info->sequence_number;
+	if (fils_config_info->key_nai_length > FILS_MAX_KEYNAME_NAI_LENGTH) {
+		pe_err("Restricting the key_nai_length of  %d to max %d",
+		       fils_config_info->key_nai_length,
+		       FILS_MAX_KEYNAME_NAI_LENGTH);
+		fils_config_info->key_nai_length = FILS_MAX_KEYNAME_NAI_LENGTH;
+	}
 	csr_fils_info->keyname_nai_data =
 		qdf_mem_malloc(fils_config_info->key_nai_length);
 	if (!csr_fils_info->keyname_nai_data) {

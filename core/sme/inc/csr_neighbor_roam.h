@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2018 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -332,6 +332,7 @@ void csr_roam_reset_roam_params(tpAniSirGlobal mac_ptr);
 #define REASON_SUPPLICANT_DISABLED_ROAMING          39
 #define REASON_CTX_INIT                             40
 #define REASON_FILS_PARAMS_CHANGED                  41
+#define REASON_SME_ISSUED                           42
 
 #if defined(WLAN_FEATURE_HOST_ROAM) || defined(WLAN_FEATURE_ROAM_OFFLOAD)
 QDF_STATUS csr_roam_offload_scan(tpAniSirGlobal pMac, uint8_t sessionId,
@@ -343,6 +344,20 @@ static inline QDF_STATUS csr_roam_offload_scan(tpAniSirGlobal pMac,
 	return QDF_STATUS_E_NOSUPPORT;
 }
 #endif
+
+/**
+ * csr_get_roam_enabled_sta_sessionid() - get the session id of the sta on which
+ * roaming is enabled.
+ * @mac_ctx:  pointer to global mac structure
+ *
+ * The function check if any sta is present and has roaming enabled and return
+ * the session id of the sta with roaming enabled else if roaming is not enabled
+ * on any STA return CSR_SESSION_ID_INVALID
+ *
+ * Return: session id of STA on which roaming is enabled
+ */
+uint8_t csr_get_roam_enabled_sta_sessionid(
+	tpAniSirGlobal mac_ctx);
 
 #if defined(WLAN_FEATURE_FILS_SK)
 /**

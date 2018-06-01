@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -42,10 +42,7 @@
 #include <cdp_txrx_peer_ops.h>
 #include <cds_utils.h>
 #include <wlan_hdd_regulatory.h>
-
-#ifdef IPA_OFFLOAD
 #include <wlan_hdd_ipa.h>
-#endif
 
 /* Preprocessor definitions and constants */
 #undef QCA_HDD_SAP_DUMP_SK_BUFF
@@ -194,9 +191,39 @@ void hdd_softap_tx_resume_cb(void *adapter_context, bool tx_resume)
 static inline struct sk_buff *hdd_skb_orphan(hdd_adapter_t *pAdapter,
 		struct sk_buff *skb)
 {
-	if (pAdapter->tx_flow_low_watermark > 0)
+	hdd_context_t *hdd_ctx = WLAN_HDD_GET_CTX(pAdapter);
+	int need_orphan = 0;
+
+	if (pAdapter->tx_flow_low_watermark > 0) {
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(3, 19, 0))
+		/*
+		 * The TCP TX throttling logic is changed a little after
+		 * 3.19-rc1 kernel, the TCP sending limit will be smaller,
+		 * which will throttle the TCP packets to the host driver.
+		 * The TCP UP LINK throughput will drop heavily. In order to
+		 * fix this issue, need to orphan the socket buffer asap, which
+		 * will call skb's destructor to notify the TCP stack that the
+		 * SKB buffer is unowned. And then the TCP stack will pump more
+		 * packets to host driver.
+		 *
+		 * The TX packets might be dropped for UDP case in the iperf
+		 * testing. So need to be protected by follow control.
+		 */
+		need_orphan = 1;
+#else
+		if (hdd_ctx->config->tx_orphan_enable)
+			need_orphan = 1;
+#endif
+	} else if (hdd_ctx->config->tx_orphan_enable) {
+		if (qdf_nbuf_is_ipv4_tcp_pkt(skb) ||
+		    qdf_nbuf_is_ipv6_tcp_pkt(skb))
+			need_orphan = 1;
+	}
+
+	if (need_orphan) {
 		skb_orphan(skb);
-	else
+		++pAdapter->hdd_stats.hddTxRxStats.txXmitOrphaned;
+	} else
 		skb = skb_unshare(skb, GFP_ATOMIC);
 
 	return skb;
@@ -214,11 +241,13 @@ static inline struct sk_buff *hdd_skb_orphan(hdd_adapter_t *pAdapter,
 		struct sk_buff *skb) {
 
 	struct sk_buff *nskb;
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(3, 19, 0))
 	hdd_context_t *hdd_ctx = pAdapter->pHddCtx;
-
+#endif
 	hdd_skb_fill_gso_size(pAdapter->dev, skb);
 
 	nskb = skb_unshare(skb, GFP_ATOMIC);
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(3, 19, 0))
 	if (unlikely(hdd_ctx->config->tx_orphan_enable) && (nskb == skb)) {
 		/*
 		 * For UDP packets we want to orphan the packet to allow the app
@@ -228,6 +257,7 @@ static inline struct sk_buff *hdd_skb_orphan(hdd_adapter_t *pAdapter,
 		++pAdapter->hdd_stats.hddTxRxStats.txXmitOrphaned;
 		skb_orphan(skb);
 	}
+#endif
 	return nskb;
 }
 #endif /* QCA_LL_LEGACY_TX_FLOW_CONTROL */
@@ -245,8 +275,8 @@ static inline struct sk_buff *hdd_skb_orphan(hdd_adapter_t *pAdapter,
  *
  * Return: Always returns NETDEV_TX_OK
  */
-static int __hdd_softap_hard_start_xmit(struct sk_buff *skb,
-					struct net_device *dev)
+static netdev_tx_t __hdd_softap_hard_start_xmit(struct sk_buff *skb,
+						struct net_device *dev)
 {
 	sme_ac_enum_type ac = SME_AC_BE;
 	hdd_adapter_t *pAdapter = (hdd_adapter_t *) netdev_priv(dev);
@@ -361,26 +391,7 @@ static int __hdd_softap_hard_start_xmit(struct sk_buff *skb,
 	if (!qdf_nbuf_ipa_owned_get(skb)) {
 #endif
 
-#if (LINUX_VERSION_CODE > KERNEL_VERSION(3, 19, 0))
-		/*
-		 * The TCP TX throttling logic is changed a little after
-		 * 3.19-rc1 kernel, the TCP sending limit will be smaller,
-		 * which will throttle the TCP packets to the host driver.
-		 * The TCP UP LINK throughput will drop heavily. In order to
-		 * fix this issue, need to orphan the socket buffer asap, which
-		 * will call skb's destructor to notify the TCP stack that the
-		 * SKB buffer is unowned. And then the TCP stack will pump more
-		 * packets to host driver.
-		 *
-		 * The TX packets might be dropped for UDP case in the iperf
-		 * testing. So need to be protected by follow control.
-		 */
 		skb = hdd_skb_orphan(pAdapter, skb);
-#else
-		/* Check if the buffer has enough header room */
-		skb = skb_unshare(skb, GFP_ATOMIC);
-#endif
-
 		if (!skb)
 			goto drop_pkt_accounting;
 
@@ -414,20 +425,12 @@ static int __hdd_softap_hard_start_xmit(struct sk_buff *skb,
 	pAdapter->aStaInfo[STAId].last_tx_rx_ts = qdf_system_ticks();
 
 	hdd_event_eapol_log(skb, QDF_TX);
-	qdf_dp_trace_log_pkt(pAdapter->sessionId, skb, QDF_TX);
 	QDF_NBUF_CB_TX_PACKET_TRACK(skb) = QDF_NBUF_TX_PKT_DATA_TRACK;
 	QDF_NBUF_UPDATE_TX_PKT_COUNT(skb, QDF_NBUF_TX_PKT_HDD);
-
 	qdf_dp_trace_set_track(skb, QDF_TX);
 	DPTRACE(qdf_dp_trace(skb, QDF_DP_TRACE_HDD_TX_PACKET_PTR_RECORD,
 			qdf_nbuf_data_addr(skb), sizeof(qdf_nbuf_data(skb)),
 			QDF_TX));
-	DPTRACE(qdf_dp_trace(skb, QDF_DP_TRACE_HDD_TX_PACKET_RECORD,
-			(uint8_t *)skb->data, qdf_nbuf_len(skb), QDF_TX));
-	if (qdf_nbuf_len(skb) > QDF_DP_TRACE_RECORD_SIZE)
-		DPTRACE(qdf_dp_trace(skb, QDF_DP_TRACE_HDD_TX_PACKET_RECORD,
-			(uint8_t *)&skb->data[QDF_DP_TRACE_RECORD_SIZE],
-			(qdf_nbuf_len(skb)-QDF_DP_TRACE_RECORD_SIZE), QDF_TX));
 
 	if (pAdapter->tx_fn(ol_txrx_get_vdev_by_sta_id(STAId),
 		 (qdf_nbuf_t) skb) != NULL) {
@@ -445,12 +448,8 @@ drop_pkt_and_release_skb:
 	qdf_net_buf_debug_release_skb(skb);
 drop_pkt:
 
-	DPTRACE(qdf_dp_trace(skb, QDF_DP_TRACE_DROP_PACKET_RECORD,
-			(uint8_t *)skb->data, qdf_nbuf_len(skb), QDF_TX));
-	if (qdf_nbuf_len(skb) > QDF_DP_TRACE_RECORD_SIZE)
-		DPTRACE(qdf_dp_trace(skb, QDF_DP_TRACE_DROP_PACKET_RECORD,
-			(uint8_t *)&skb->data[QDF_DP_TRACE_RECORD_SIZE],
-			(qdf_nbuf_len(skb)-QDF_DP_TRACE_RECORD_SIZE), QDF_TX));
+	qdf_dp_trace_data_pkt(skb, QDF_DP_TRACE_DROP_PACKET_RECORD, 0,
+			      QDF_TX);
 	kfree_skb(skb);
 
 drop_pkt_accounting:
@@ -470,9 +469,10 @@ drop_pkt_accounting:
  *
  * Return: Always returns NETDEV_TX_OK
  */
-int hdd_softap_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
+netdev_tx_t hdd_softap_hard_start_xmit(struct sk_buff *skb,
+				       struct net_device *dev)
 {
-	int ret;
+	netdev_tx_t ret;
 
 	cds_ssr_protect(__func__);
 	ret = __hdd_softap_hard_start_xmit(skb, dev);
@@ -523,7 +523,7 @@ static void __hdd_softap_tx_timeout(struct net_device *dev)
 			  i, netif_tx_queue_stopped(txq), txq->trans_start);
 	}
 
-	wlan_hdd_display_netif_queue_history(hdd_ctx);
+	wlan_hdd_display_netif_queue_history(hdd_ctx, QDF_STATS_VERB_LVL_HIGH);
 	ol_tx_dump_flow_pool_info();
 	QDF_TRACE(QDF_MODULE_ID_HDD_DATA, QDF_TRACE_LEVEL_DEBUG,
 			"carrier state: %d", netif_carrier_ok(dev));
@@ -540,7 +540,7 @@ static void __hdd_softap_tx_timeout(struct net_device *dev)
 			ol_txrx_post_data_stall_event(
 					DATA_STALL_LOG_INDICATOR_HOST_DRIVER,
 					DATA_STALL_LOG_HOST_SOFTAP_TX_TIMEOUT,
-					0xFF, 0XFF,
+					0xFF, 0xFF,
 					DATA_STALL_LOG_RECOVERY_TRIGGER_PDR);
 	}
 }
@@ -675,7 +675,6 @@ QDF_STATUS hdd_softap_rx_packet_cbk(void *context, qdf_nbuf_t rxBuf)
 	unsigned int cpu_index;
 	struct sk_buff *skb = NULL;
 	hdd_context_t *pHddCtx = NULL;
-	bool proto_pkt_logged = false;
 	struct qdf_mac_addr src_mac;
 	uint8_t staid;
 
@@ -732,24 +731,14 @@ QDF_STATUS hdd_softap_rx_packet_cbk(void *context, qdf_nbuf_t rxBuf)
 	}
 
 	hdd_event_eapol_log(skb, QDF_RX);
-	proto_pkt_logged = qdf_dp_trace_log_pkt(pAdapter->sessionId,
-						skb, QDF_RX);
-
+	qdf_dp_trace_log_pkt(pAdapter->sessionId, skb, QDF_RX);
 	DPTRACE(qdf_dp_trace(skb,
 		QDF_DP_TRACE_RX_HDD_PACKET_PTR_RECORD,
 		qdf_nbuf_data_addr(skb),
 		sizeof(qdf_nbuf_data(skb)), QDF_RX));
-
-	if (!proto_pkt_logged) {
-		DPTRACE(qdf_dp_trace(skb, QDF_DP_TRACE_HDD_RX_PACKET_RECORD,
-			(uint8_t *)skb->data, qdf_nbuf_len(skb), QDF_RX));
-		if (qdf_nbuf_len(skb) > QDF_DP_TRACE_RECORD_SIZE)
-			DPTRACE(qdf_dp_trace(skb,
-				QDF_DP_TRACE_HDD_RX_PACKET_RECORD,
-				(uint8_t *)&skb->data[QDF_DP_TRACE_RECORD_SIZE],
-				(qdf_nbuf_len(skb)-QDF_DP_TRACE_RECORD_SIZE),
-				QDF_RX));
-	}
+	DPTRACE(qdf_dp_trace_data_pkt(skb,
+				      QDF_DP_TRACE_RX_PACKET_RECORD,
+				      0, QDF_RX));
 
 	skb->protocol = eth_type_trans(skb, skb->dev);
 
@@ -778,8 +767,6 @@ QDF_STATUS hdd_softap_rx_packet_cbk(void *context, qdf_nbuf_t rxBuf)
 		++pAdapter->hdd_stats.hddTxRxStats.rxDelivered[cpu_index];
 	else
 		++pAdapter->hdd_stats.hddTxRxStats.rxRefused[cpu_index];
-
-	pAdapter->dev->last_rx = jiffies;
 
 	return QDF_STATUS_SUCCESS;
 }
@@ -817,6 +804,14 @@ QDF_STATUS hdd_softap_deregister_sta(hdd_adapter_t *pAdapter, uint8_t staId)
 			staId, qdf_status, qdf_status);
 
 	if (pAdapter->aStaInfo[staId].isUsed) {
+		if (hdd_ipa_uc_is_enabled(pHddCtx)) {
+			if (hdd_ipa_wlan_evt(pAdapter,
+					 pAdapter->aStaInfo[staId].ucSTAId,
+					 HDD_IPA_CLIENT_DISCONNECT,
+					 pAdapter->aStaInfo[staId].macAddrSTA.
+					 bytes))
+				hdd_err("WLAN_CLIENT_DISCONNECT event failed");
+		}
 		spin_lock_bh(&pAdapter->staInfo_lock);
 		qdf_mem_zero(&pAdapter->aStaInfo[staId],
 			     sizeof(hdd_station_info_t));
@@ -913,6 +908,10 @@ QDF_STATUS hdd_softap_register_sta(hdd_adapter_t *pAdapter,
 
 		pAdapter->aStaInfo[staId].tlSTAState = OL_TXRX_PEER_STATE_AUTH;
 		pAdapter->sessionCtx.ap.uIsAuthenticated = true;
+		if (!qdf_is_macaddr_broadcast(pPeerMacAddress))
+			qdf_status = wlan_hdd_send_sta_authorized_event(
+							   pAdapter, pHddCtx,
+							   pPeerMacAddress);
 	} else {
 
 		hdd_info("ULA auth StaId= %d.  Changing TL state to CONNECTED at Join time",
@@ -1021,6 +1020,14 @@ QDF_STATUS hdd_softap_stop_bss(hdd_adapter_t *pAdapter)
 	if (pHddCtx->config->disable_indoor_channel) {
 		hdd_update_indoor_channel(pHddCtx, false);
 		sme_update_channel_list(pHddCtx->hHal);
+	}
+
+	if (hdd_ipa_is_enabled(pHddCtx)) {
+		if (hdd_ipa_wlan_evt(pAdapter,
+				WLAN_HDD_GET_AP_CTX_PTR(pAdapter)->uBCStaId,
+				HDD_IPA_AP_DISCONNECT,
+				pAdapter->dev->dev_addr))
+			hdd_err("WLAN_AP_DISCONNECT event failed");
 	}
 
 	return qdf_status;

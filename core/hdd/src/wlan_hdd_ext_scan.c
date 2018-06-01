@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -1657,8 +1657,9 @@ static int __wlan_hdd_cfg80211_extscan_get_capabilities(struct wiphy *wiphy,
 		hdd_err("extscan not supported");
 		return -ENOTSUPP;
 	}
-	if (nla_parse(tb, QCA_WLAN_VENDOR_ATTR_EXTSCAN_SUBCMD_CONFIG_PARAM_MAX,
-		      data, data_len, wlan_hdd_extscan_config_policy)) {
+	if (hdd_nla_parse(tb,
+			  QCA_WLAN_VENDOR_ATTR_EXTSCAN_SUBCMD_CONFIG_PARAM_MAX,
+			  data, data_len, wlan_hdd_extscan_config_policy)) {
 		hdd_err("Invalid ATTR");
 		return -EINVAL;
 	}
@@ -1795,8 +1796,8 @@ static int __wlan_hdd_cfg80211_extscan_get_cached_results(struct wiphy *wiphy,
 		hdd_err("extscan not supported");
 		return -ENOTSUPP;
 	}
-	if (nla_parse(tb, PARAM_MAX, data, data_len,
-		wlan_hdd_extscan_config_policy)) {
+	if (hdd_nla_parse(tb, PARAM_MAX, data, data_len,
+			  wlan_hdd_extscan_config_policy)) {
 		hdd_err("Invalid ATTR");
 		return -EINVAL;
 	}
@@ -1944,8 +1945,9 @@ __wlan_hdd_cfg80211_extscan_set_bssid_hotlist(struct wiphy *wiphy,
 		hdd_err("extscan not supported");
 		return -ENOTSUPP;
 	}
-	if (nla_parse(tb, QCA_WLAN_VENDOR_ATTR_EXTSCAN_SUBCMD_CONFIG_PARAM_MAX,
-		      data, data_len, wlan_hdd_extscan_config_policy)) {
+	if (hdd_nla_parse(tb,
+			  QCA_WLAN_VENDOR_ATTR_EXTSCAN_SUBCMD_CONFIG_PARAM_MAX,
+			  data, data_len, wlan_hdd_extscan_config_policy)) {
 		hdd_err("Invalid ATTR");
 		return -EINVAL;
 	}
@@ -2008,11 +2010,11 @@ __wlan_hdd_cfg80211_extscan_set_bssid_hotlist(struct wiphy *wiphy,
 			break;
 		}
 
-		if (nla_parse
-		    (tb2, QCA_WLAN_VENDOR_ATTR_EXTSCAN_SUBCMD_CONFIG_PARAM_MAX,
-		    nla_data(apTh), nla_len(apTh),
-		    wlan_hdd_extscan_config_policy)) {
-			hdd_err("nla_parse failed");
+		if (hdd_nla_parse(tb2,
+			   QCA_WLAN_VENDOR_ATTR_EXTSCAN_SUBCMD_CONFIG_PARAM_MAX,
+			   nla_data(apTh), nla_len(apTh),
+			   wlan_hdd_extscan_config_policy)) {
+			hdd_err("hdd_nla_parse failed");
 			goto fail;
 		}
 
@@ -2161,8 +2163,9 @@ __wlan_hdd_cfg80211_extscan_set_significant_change(struct wiphy *wiphy,
 	if (0 != retval)
 		return -EINVAL;
 
-	if (nla_parse(tb, QCA_WLAN_VENDOR_ATTR_EXTSCAN_SUBCMD_CONFIG_PARAM_MAX,
-		      data, data_len, wlan_hdd_extscan_config_policy)) {
+	if (hdd_nla_parse(tb,
+			  QCA_WLAN_VENDOR_ATTR_EXTSCAN_SUBCMD_CONFIG_PARAM_MAX,
+			  data, data_len, wlan_hdd_extscan_config_policy)) {
 		hdd_err("Invalid ATTR");
 		return -EINVAL;
 	}
@@ -2250,11 +2253,11 @@ __wlan_hdd_cfg80211_extscan_set_significant_change(struct wiphy *wiphy,
 			break;
 		}
 
-		if (nla_parse
-		    (tb2, QCA_WLAN_VENDOR_ATTR_EXTSCAN_SUBCMD_CONFIG_PARAM_MAX,
-		    nla_data(apTh), nla_len(apTh),
-		    wlan_hdd_extscan_config_policy)) {
-			hdd_err("nla_parse failed");
+		if (hdd_nla_parse(tb2,
+			   QCA_WLAN_VENDOR_ATTR_EXTSCAN_SUBCMD_CONFIG_PARAM_MAX,
+			   nla_data(apTh), nla_len(apTh),
+			   wlan_hdd_extscan_config_policy)) {
+			hdd_err("hdd_nla_parse failed");
 			goto fail;
 		}
 
@@ -2460,8 +2463,9 @@ __wlan_hdd_cfg80211_extscan_get_valid_channels(struct wiphy *wiphy,
 		hdd_err("extscan not supported");
 		return -ENOTSUPP;
 	}
-	if (nla_parse(tb, QCA_WLAN_VENDOR_ATTR_EXTSCAN_SUBCMD_CONFIG_PARAM_MAX,
-		      data, data_len, wlan_hdd_extscan_config_policy)) {
+	if (hdd_nla_parse(tb,
+			  QCA_WLAN_VENDOR_ATTR_EXTSCAN_SUBCMD_CONFIG_PARAM_MAX,
+			  data, data_len, wlan_hdd_extscan_config_policy)) {
 		hdd_err("Invalid ATTR");
 		return -EINVAL;
 	}
@@ -2714,11 +2718,11 @@ static int hdd_extscan_start_fill_bucket_channel_spec(
 			break;
 		}
 
-		if (nla_parse(bucket,
-			      QCA_WLAN_VENDOR_ATTR_EXTSCAN_SUBCMD_CONFIG_PARAM_MAX,
-			      nla_data(buckets), nla_len(buckets),
-			      wlan_hdd_extscan_config_policy)) {
-			hdd_err("nla_parse failed");
+		if (hdd_nla_parse(bucket,
+			   QCA_WLAN_VENDOR_ATTR_EXTSCAN_SUBCMD_CONFIG_PARAM_MAX,
+			   nla_data(buckets), nla_len(buckets),
+			   wlan_hdd_extscan_config_policy)) {
+			hdd_err("hdd_nla_parse failed");
 			goto fail;
 		}
 
@@ -2940,11 +2944,11 @@ static int hdd_extscan_start_fill_bucket_channel_spec(
 							    total_channels))
 				break;
 
-			if (nla_parse(channel,
-				QCA_WLAN_VENDOR_ATTR_EXTSCAN_SUBCMD_CONFIG_PARAM_MAX,
-				nla_data(channels), nla_len(channels),
-				wlan_hdd_extscan_config_policy)) {
-				hdd_err("nla_parse failed");
+			if (hdd_nla_parse(channel,
+			   QCA_WLAN_VENDOR_ATTR_EXTSCAN_SUBCMD_CONFIG_PARAM_MAX,
+			   nla_data(channels), nla_len(channels),
+			   wlan_hdd_extscan_config_policy)) {
+				hdd_err("hdd_nla_parse failed");
 				goto fail;
 			}
 
@@ -3158,8 +3162,8 @@ __wlan_hdd_cfg80211_extscan_start(struct wiphy *wiphy,
 		hdd_err("extscan not supported");
 		return -ENOTSUPP;
 	}
-	if (nla_parse(tb, PARAM_MAX, data, data_len,
-		wlan_hdd_extscan_config_policy)) {
+	if (hdd_nla_parse(tb, PARAM_MAX, data, data_len,
+			  wlan_hdd_extscan_config_policy)) {
 		hdd_err("Invalid ATTR");
 		return -EINVAL;
 	}
@@ -3372,8 +3376,8 @@ __wlan_hdd_cfg80211_extscan_stop(struct wiphy *wiphy,
 		hdd_err("extscan not supported");
 		return -ENOTSUPP;
 	}
-	if (nla_parse(tb, PARAM_MAX, data, data_len,
-			wlan_hdd_extscan_config_policy)) {
+	if (hdd_nla_parse(tb, PARAM_MAX, data, data_len,
+			  wlan_hdd_extscan_config_policy)) {
 		hdd_err("Invalid ATTR");
 		return -EINVAL;
 	}
@@ -3502,8 +3506,9 @@ __wlan_hdd_cfg80211_extscan_reset_bssid_hotlist(struct wiphy *wiphy,
 		hdd_err("extscan not supported");
 		return -ENOTSUPP;
 	}
-	if (nla_parse(tb, QCA_WLAN_VENDOR_ATTR_EXTSCAN_SUBCMD_CONFIG_PARAM_MAX,
-		      data, data_len, wlan_hdd_extscan_config_policy)) {
+	if (hdd_nla_parse(tb,
+			  QCA_WLAN_VENDOR_ATTR_EXTSCAN_SUBCMD_CONFIG_PARAM_MAX,
+			  data, data_len, wlan_hdd_extscan_config_policy)) {
 		hdd_err("Invalid ATTR");
 		return -EINVAL;
 	}
@@ -3630,8 +3635,10 @@ __wlan_hdd_cfg80211_extscan_reset_significant_change(struct wiphy
 		hdd_err("extscan not supported");
 		return -ENOTSUPP;
 	}
-	if (nla_parse(tb, QCA_WLAN_VENDOR_ATTR_EXTSCAN_SUBCMD_CONFIG_PARAM_MAX,
-		      data, data_len, wlan_hdd_extscan_config_policy)) {
+
+	if (hdd_nla_parse(tb,
+			  QCA_WLAN_VENDOR_ATTR_EXTSCAN_SUBCMD_CONFIG_PARAM_MAX,
+			  data, data_len, wlan_hdd_extscan_config_policy)) {
 		hdd_err("Invalid ATTR");
 		return -EINVAL;
 	}
@@ -3755,10 +3762,10 @@ static int hdd_extscan_epno_fill_network_list(
 			break;
 		}
 
-		if (nla_parse(network, QCA_WLAN_VENDOR_ATTR_PNO_MAX,
-			      nla_data(networks), nla_len(networks),
-			      wlan_hdd_pno_config_policy)) {
-			hdd_err("nla_parse failed");
+		if (hdd_nla_parse(network, QCA_WLAN_VENDOR_ATTR_PNO_MAX,
+				  nla_data(networks), nla_len(networks),
+				  wlan_hdd_pno_config_policy)) {
+			hdd_err("hdd_nla_parse failed");
 			return -EINVAL;
 		}
 
@@ -3770,7 +3777,7 @@ static int hdd_extscan_epno_fill_network_list(
 		ssid_len = nla_len(
 			network[QCA_WLAN_VENDOR_ATTR_PNO_SET_LIST_PARAM_EPNO_NETWORK_SSID]);
 
-		/* nla_parse will detect overflow but not underflow */
+		/* hdd_nla_parse will detect overflow but not underflow */
 		if (0 == ssid_len) {
 			hdd_err("zero ssid length");
 			return -EINVAL;
@@ -3850,14 +3857,14 @@ static int __wlan_hdd_cfg80211_set_epno_list(struct wiphy *wiphy,
 		hdd_err("extscan not supported");
 		return -ENOTSUPP;
 	}
+
 	if (QDF_GLOBAL_FTM_MODE == hdd_get_conparam()) {
 		hdd_err("Command not allowed in FTM mode");
 		return -EPERM;
 	}
 
-	if (nla_parse(tb, QCA_WLAN_VENDOR_ATTR_PNO_MAX,
-		      data, data_len,
-		      wlan_hdd_pno_config_policy)) {
+	if (hdd_nla_parse(tb, QCA_WLAN_VENDOR_ATTR_PNO_MAX,
+			  data, data_len, wlan_hdd_pno_config_policy)) {
 		hdd_err("Invalid ATTR");
 		return -EINVAL;
 	}
@@ -4021,6 +4028,13 @@ int wlan_hdd_cfg80211_set_epno_list(struct wiphy *wiphy,
 	return ret;
 }
 
+#define PARAM_ID QCA_WLAN_VENDOR_ATTR_PNO_PASSPOINT_NETWORK_PARAM_ID
+#define PARAM_REALM QCA_WLAN_VENDOR_ATTR_PNO_PASSPOINT_NETWORK_PARAM_REALM
+#define PARAM_ROAM_ID \
+	QCA_WLAN_VENDOR_ATTR_PNO_PASSPOINT_NETWORK_PARAM_ROAM_CNSRTM_ID
+#define PARAM_ROAM_PLMN \
+	QCA_WLAN_VENDOR_ATTR_PNO_PASSPOINT_NETWORK_PARAM_ROAM_PLMN
+
 /**
  * hdd_extscan_passpoint_fill_network_list() - passpoint fill network list
  * @hddctx: HDD context
@@ -4039,7 +4053,8 @@ static int hdd_extscan_passpoint_fill_network_list(
 {
 	struct nlattr *network[QCA_WLAN_VENDOR_ATTR_PNO_MAX + 1];
 	struct nlattr *networks;
-	int rem1, len;
+	int rem1;
+	size_t len;
 	uint8_t index;
 	uint32_t expected_networks;
 
@@ -4059,58 +4074,55 @@ static int hdd_extscan_passpoint_fill_network_list(
 			break;
 		}
 
-		if (nla_parse(network,
-			      QCA_WLAN_VENDOR_ATTR_PNO_MAX,
-			      nla_data(networks), nla_len(networks),
-			      wlan_hdd_pno_config_policy)) {
-			hdd_err("nla_parse failed");
+		if (hdd_nla_parse(network, QCA_WLAN_VENDOR_ATTR_PNO_MAX,
+				  nla_data(networks), nla_len(networks),
+				  wlan_hdd_pno_config_policy)) {
+			hdd_err("hdd_nla_parse failed");
 			return -EINVAL;
 		}
 
 		/* Parse and fetch identifier */
-		if (!network[QCA_WLAN_VENDOR_ATTR_PNO_PASSPOINT_NETWORK_PARAM_ID]) {
+		if (!network[PARAM_ID]) {
 			hdd_err("attr passpoint id failed");
 			return -EINVAL;
 		}
-		req_msg->networks[index].id = nla_get_u32(
-			network[QCA_WLAN_VENDOR_ATTR_PNO_PASSPOINT_NETWORK_PARAM_ID]);
+		req_msg->networks[index].id = nla_get_u32(network[PARAM_ID]);
 		hdd_debug("Id %u", req_msg->networks[index].id);
 
 		/* Parse and fetch realm */
-		if (!network[QCA_WLAN_VENDOR_ATTR_PNO_PASSPOINT_NETWORK_PARAM_REALM]) {
+		if (!network[PARAM_REALM]) {
 			hdd_err("attr realm failed");
 			return -EINVAL;
 		}
-		len = nla_len(
-			network[QCA_WLAN_VENDOR_ATTR_PNO_PASSPOINT_NETWORK_PARAM_REALM]);
-		if (len < 0 || len > SIR_PASSPOINT_REALM_LEN) {
-			hdd_err("Invalid realm size %d", len);
+		len = nla_strlcpy(req_msg->networks[index].realm,
+				  network[PARAM_REALM],
+				  SIR_PASSPOINT_REALM_LEN);
+		/* Don't send partial realm to firmware */
+		if (len >= SIR_PASSPOINT_REALM_LEN) {
+			hdd_err("user passed invalid realm, len:%zu", len);
 			return -EINVAL;
 		}
-		qdf_mem_copy(req_msg->networks[index].realm,
-				nla_data(network[QCA_WLAN_VENDOR_ATTR_PNO_PASSPOINT_NETWORK_PARAM_REALM]),
-				len);
-		hdd_debug("realm len %d", len);
+
 		hdd_debug("realm: %s", req_msg->networks[index].realm);
 
 		/* Parse and fetch roaming consortium ids */
-		if (!network[QCA_WLAN_VENDOR_ATTR_PNO_PASSPOINT_NETWORK_PARAM_ROAM_CNSRTM_ID]) {
+		if (!network[PARAM_ROAM_ID]) {
 			hdd_err("attr roaming consortium ids failed");
 			return -EINVAL;
 		}
 		nla_memcpy(&req_msg->networks[index].roaming_consortium_ids,
-			network[QCA_WLAN_VENDOR_ATTR_PNO_PASSPOINT_NETWORK_PARAM_ROAM_CNSRTM_ID],
-			sizeof(req_msg->networks[0].roaming_consortium_ids));
+			   network[PARAM_ROAM_ID],
+			   sizeof(req_msg->networks[0].roaming_consortium_ids));
 		hdd_debug("roaming consortium ids");
 
 		/* Parse and fetch plmn */
-		if (!network[QCA_WLAN_VENDOR_ATTR_PNO_PASSPOINT_NETWORK_PARAM_ROAM_PLMN]) {
+		if (!network[PARAM_ROAM_PLMN]) {
 			hdd_err("attr plmn failed");
 			return -EINVAL;
 		}
 		nla_memcpy(&req_msg->networks[index].plmn,
-			network[QCA_WLAN_VENDOR_ATTR_PNO_PASSPOINT_NETWORK_PARAM_ROAM_PLMN],
-			SIR_PASSPOINT_PLMN_LEN);
+			   network[PARAM_ROAM_PLMN],
+			   SIR_PASSPOINT_PLMN_LEN);
 		hdd_debug("plmn %02x:%02x:%02x)",
 			req_msg->networks[index].plmn[0],
 			req_msg->networks[index].plmn[1],
@@ -4159,8 +4171,8 @@ static int __wlan_hdd_cfg80211_set_passpoint_list(struct wiphy *wiphy,
 		return -EPERM;
 	}
 
-	if (nla_parse(tb, QCA_WLAN_VENDOR_ATTR_PNO_MAX, data, data_len,
-		      wlan_hdd_pno_config_policy)) {
+	if (hdd_nla_parse(tb, QCA_WLAN_VENDOR_ATTR_PNO_MAX, data, data_len,
+			  wlan_hdd_pno_config_policy)) {
 		hdd_err("Invalid ATTR");
 		return -EINVAL;
 	}
@@ -4280,8 +4292,8 @@ static int __wlan_hdd_cfg80211_reset_passpoint_list(struct wiphy *wiphy,
 		return -EPERM;
 	}
 
-	if (nla_parse(tb, QCA_WLAN_VENDOR_ATTR_PNO_MAX, data, data_len,
-		wlan_hdd_extscan_config_policy)) {
+	if (hdd_nla_parse(tb, QCA_WLAN_VENDOR_ATTR_PNO_MAX, data, data_len,
+			  wlan_hdd_extscan_config_policy)) {
 		hdd_err("Invalid ATTR");
 		return -EINVAL;
 	}
@@ -4344,6 +4356,11 @@ int wlan_hdd_cfg80211_reset_passpoint_list(struct wiphy *wiphy,
 
 	return ret;
 }
+
+#undef PARAM_ID
+#undef PARAM_REALM
+#undef PARAM_ROAM_ID
+#undef PARAM_ROAM_PLMN
 
 /**
  * wlan_hdd_init_completion_extwow() - Initialize ext wow variable

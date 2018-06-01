@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2018 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -60,23 +60,28 @@
 #define REG_RULE_5500_5720    REG_RULE(5500-10, 5720+10, 160, 0, 20, \
 		NL80211_RRF_PASSIVE_SCAN | NL80211_RRF_NO_IBSS)
 
+#define REG_RULE_5500_5700    REG_RULE(5500-10, 5700+10, 160, 0, 20, \
+		NL80211_RRF_PASSIVE_SCAN | NL80211_RRF_NO_IBSS)
+
 #define REG_RULE_5745_5925    REG_RULE(5745-10, 5925+10, 80, 0, 20, \
 		NL80211_RRF_PASSIVE_SCAN | NL80211_RRF_NO_IBSS)
+
+#define REG_RULE_5745_5825    REG_RULE(5745-10, 5825+10, 80, 0, 20, \
+				       NL80211_RRF_NO_IR)
 
 static bool init_by_driver;
 static bool init_by_reg_core;
 
 static const struct ieee80211_regdomain
 hdd_world_regrules_60_61_62 = {
-	.n_reg_rules = 6,
+	.n_reg_rules = 5,
 	.alpha2 =  "00",
 	.reg_rules = {
 		REG_RULE_2412_2462,
 		REG_RULE_2467_2472,
-		REG_RULE_2484,
 		REG_RULE_5180_5320,
-		REG_RULE_5500_5720,
-		REG_RULE_5745_5925,
+		REG_RULE_5500_5700,
+		REG_RULE_5745_5825,
 	}
 };
 
@@ -184,9 +189,9 @@ static bool hdd_is_world_regdomain(uint32_t reg_domain)
  * hdd_update_regulatory_info() - update regulatory info
  * @hdd_ctx: hdd context
  *
- * Return: void
+ * Return: Error Code
  */
-static void hdd_update_regulatory_info(hdd_context_t *hdd_ctx)
+static int hdd_update_regulatory_info(hdd_context_t *hdd_ctx)
 {
 	uint32_t country_code;
 
@@ -195,7 +200,7 @@ static void hdd_update_regulatory_info(hdd_context_t *hdd_ctx)
 	hdd_ctx->reg.reg_domain = CTRY_FLAG;
 	hdd_ctx->reg.reg_domain |= country_code;
 
-	cds_fill_some_regulatory_info(&hdd_ctx->reg);
+	return cds_fill_some_regulatory_info(&hdd_ctx->reg);
 
 }
 
@@ -491,6 +496,17 @@ static void hdd_process_regulatory_data(hdd_context_t *hdd_ctx,
 
 			wiphy_chan =
 				&(wiphy->bands[band_num]->channels[chan_num]);
+
+			while ((wiphy_chan->center_freq !=
+					chan_mapping[chan_enum].center_freq) &&
+					(chan_enum < NUM_CHANNELS))
+				chan_enum++;
+			if (NUM_CHANNELS == chan_enum) {
+				hdd_alert("wiphy channel freq %d not found",
+						wiphy_chan->center_freq);
+				break;
+			}
+
 			cds_chan = &(reg_channels[chan_enum]);
 			if (CHAN_ENUM_144 == chan_enum)
 				wiphy_chan_144 = wiphy_chan;
@@ -700,6 +716,20 @@ static void hdd_restore_reg_flags(struct wiphy *wiphy, uint32_t flags)
 }
 #endif
 
+int hdd_apply_cached_country_info(hdd_context_t *hdd_ctx)
+{
+	int ret_val = 0;
+
+	ret_val = hdd_update_regulatory_info(hdd_ctx);
+	if (ret_val)
+		return ret_val;
+
+	hdd_process_regulatory_data(hdd_ctx, hdd_ctx->wiphy,
+				    hdd_ctx->reg.reset);
+
+	sme_set_cc_src(hdd_ctx->hHal, hdd_ctx->reg.cc_src);
+	return ret_val;
+}
 
 /**
  * hdd_reg_notifier() - regulatory notifier
@@ -714,8 +744,9 @@ void hdd_reg_notifier(struct wiphy *wiphy,
 	hdd_context_t *hdd_ctx = wiphy_priv(wiphy);
 	bool reset = false;
 	enum dfs_region dfs_reg;
+	int32_t ret_val;
 
-	hdd_info("country: %c%c, initiator %d, dfs_region: %d",
+	hdd_debug("country: %c%c, initiator %d, dfs_region: %d",
 		  request->alpha2[0],
 		  request->alpha2[1],
 		  request->initiator,
@@ -730,11 +761,6 @@ void hdd_reg_notifier(struct wiphy *wiphy,
 	    cds_is_driver_in_bad_state()) {
 		hdd_err("%s: unloading or ssr in progress, ignore",
 			__func__);
-		return;
-	}
-
-	if (hdd_ctx->driver_status == DRIVER_MODULES_CLOSED) {
-		hdd_err("Driver module is closed; dropping request");
 		return;
 	}
 
@@ -789,15 +815,11 @@ void hdd_reg_notifier(struct wiphy *wiphy,
 			hdd_ctx->reg.cc_src = SOURCE_CORE;
 			pld_set_cc_source(hdd_ctx->parent_dev,
 						PLD_SOURCE_CORE);
-			sme_set_cc_src(hdd_ctx->hHal, SOURCE_CORE);
 			if (is_wiphy_custom_regulatory(wiphy))
 				reset = true;
 		} else if (NL80211_REGDOM_SET_BY_DRIVER == request->initiator) {
 			hdd_ctx->reg.cc_src = SOURCE_DRIVER;
-			sme_set_cc_src(hdd_ctx->hHal, SOURCE_DRIVER);
 		} else {
-			sme_set_cc_src(hdd_ctx->hHal, SOURCE_USERSPACE);
-
 			if (pld_get_cc_source(hdd_ctx->parent_dev)
 							== PLD_SOURCE_11D)
 				hdd_ctx->reg.cc_src = SOURCE_11D;
@@ -810,18 +832,27 @@ void hdd_reg_notifier(struct wiphy *wiphy,
 
 		hdd_ctx->reg.alpha2[0] = request->alpha2[0];
 		hdd_ctx->reg.alpha2[1] = request->alpha2[1];
+		hdd_ctx->reg.reset = reset;
 
-		hdd_update_regulatory_info(hdd_ctx);
+		hdd_set_dfs_region(hdd_ctx,
+				   (enum dfs_region) request->dfs_region);
 
-		hdd_process_regulatory_data(hdd_ctx, wiphy, reset);
 
+		if (hdd_ctx->driver_status == DRIVER_MODULES_CLOSED) {
+			hdd_debug("Driver module is closed, apply it later");
+			return;
+		}
+
+		ret_val = hdd_apply_cached_country_info(hdd_ctx);
+
+		if (ret_val) {
+			hdd_err("invalid reg info, do not process");
+			return;
+		}
 		sme_generic_change_country_code(hdd_ctx->hHal,
 						hdd_ctx->reg.alpha2);
 
 		cds_fill_and_send_ctl_to_fw(&hdd_ctx->reg);
-
-		hdd_set_dfs_region(hdd_ctx,
-				   (enum dfs_region) request->dfs_region);
 
 		cds_get_dfs_region(&dfs_reg);
 		cds_set_wma_dfs_region(dfs_reg);

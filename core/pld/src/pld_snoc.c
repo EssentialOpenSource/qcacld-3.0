@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2018 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -263,10 +263,6 @@ static int pld_snoc_uevent(struct device *dev,
 		data.uevent = PLD_FW_DOWN;
 		data.fw_down.crashed = uevent_data->crashed;
 		break;
-	case ICNSS_UEVENT_FW_READY:
-		data.uevent = PLD_FW_READY;
-		break;
-
 	default:
 		return 0;
 	}
@@ -275,8 +271,14 @@ static int pld_snoc_uevent(struct device *dev,
 	return 0;
 }
 
+#ifdef MULTI_IF_NAME
+#define PLD_SNOC_OPS_NAME "pld_snoc_" MULTI_IF_NAME
+#else
+#define PLD_SNOC_OPS_NAME "pld_snoc"
+#endif
+
 struct icnss_driver_ops pld_snoc_ops = {
-	.name       = "pld_snoc",
+	.name       = PLD_SNOC_OPS_NAME,
 	.probe      = pld_snoc_probe,
 	.remove     = pld_snoc_remove,
 	.shutdown   = pld_snoc_shutdown,
@@ -435,7 +437,7 @@ int pld_snoc_get_soc_info(struct device *dev, struct pld_soc_info *info)
 		return -ENODEV;
 
 	ret = icnss_get_soc_info(dev, &icnss_info);
-	if (ret)
+	if (0 != ret)
 		return ret;
 
 	memcpy(info, &icnss_info, sizeof(*info));
@@ -451,7 +453,7 @@ int pld_snoc_get_soc_info(struct device *dev, struct pld_soc_info *info)
 		return -ENODEV;
 
 	ret = icnss_get_soc_info(&icnss_info);
-	if (ret)
+	if (0 != ret)
 		return ret;
 
 	memcpy(info, &icnss_info, sizeof(*info));

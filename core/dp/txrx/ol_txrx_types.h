@@ -51,6 +51,7 @@
 #include "ol_txrx_osif_api.h" /* ol_rx_callback_fp */
 #include "cdp_txrx_flow_ctrl_v2.h"
 #include "cdp_txrx_peer_ops.h"
+#include <qdf_trace.h>
 
 /*
  * The target may allocate multiple IDs for a peer.
@@ -1024,9 +1025,15 @@ struct ol_txrx_pdev_t {
 	ol_tx_pause_callback_fp pause_cb;
 
 	struct {
-		void (*lro_flush_cb)(void *);
-	} lro_info;
+		void (*offld_flush_cb)(void *);
+	} rx_offld_info;
 	struct ol_txrx_peer_t *self_peer;
+
+	/* dp debug fs */
+	struct dentry *dpt_stats_log_dir;
+	enum qdf_dpt_debugfs_state state;
+	struct qdf_debugfs_fops dpt_debugfs_fops;
+
 };
 
 struct ol_txrx_ocb_chan_info {
@@ -1069,6 +1076,7 @@ struct ol_txrx_vdev_t {
 		 */
 		ol_txrx_vdev_delete_cb callback;
 		void *context;
+		atomic_t detaching;
 	} delete;
 
 	/* safe mode control to bypass the encrypt and decipher process */
@@ -1265,6 +1273,7 @@ struct ol_txrx_peer_t {
 	struct ol_rx_reorder_t tids_rx_reorder[OL_TXRX_NUM_EXT_TIDS];
 	union htt_rx_pn_t tids_last_pn[OL_TXRX_NUM_EXT_TIDS];
 	uint8_t tids_last_pn_valid[OL_TXRX_NUM_EXT_TIDS];
+	uint8_t tids_rekey_flag[OL_TXRX_NUM_EXT_TIDS];
 	uint16_t tids_next_rel_idx[OL_TXRX_NUM_EXT_TIDS];
 	uint16_t tids_last_seq[OL_TXRX_NUM_EXT_TIDS];
 	uint16_t tids_mcast_last_seq[OL_TXRX_NUM_EXT_TIDS];
@@ -1384,6 +1393,11 @@ struct ol_error_info {
 struct ol_rx_remote_data {
 	qdf_nbuf_t msdu;
 	uint8_t mac_id;
+};
+
+struct ol_fw_data {
+	void *data;
+	uint32_t len;
 };
 
 #define INVALID_REORDER_INDEX 0xFFFF

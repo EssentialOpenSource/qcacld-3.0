@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -67,6 +67,9 @@ typedef enum {
 #define CENTER_FREQ_DIFF_160MHz 8
 #define CENTER_FREQ_DIFF_80P80MHz 16
 
+#define CH_TO_CNTR_FREQ_DIFF_160MHz 14
+#define CH_TO_CNTR_FREQ_DIFF_80MHz 6
+
 #define IS_VHT_NSS_1x1(__mcs_map)	((__mcs_map & 0xFFFC) == 0xFFFC)
 
 #define MGMT_RX_PACKETS_THRESHOLD 200
@@ -104,18 +107,6 @@ void lim_print_sme_state(tpAniSirGlobal pMac, uint16_t logLevel,
 		tLimSmeStates state);
 void lim_print_msg_name(tpAniSirGlobal pMac, uint16_t logLevel, uint32_t msgType);
 
-/**
- * lim_send_open_system_auth() - api to send open system auth frame
- * @ctx: Pointer to global mac structure
- * @session_id: session id
- *
- * This function is used to send open system auth when
- * shared auth fails with reason-algo not supported
- *
- * Return: None
- */
-void lim_send_open_system_auth(void *ctx, uint32_t param);
-
 extern tSirRetStatus lim_send_set_max_tx_power_req(tpAniSirGlobal pMac,
 		int8_t txPower,
 		tpPESession pSessionEntry);
@@ -123,9 +114,6 @@ extern uint8_t lim_get_max_tx_power(int8_t regMax, int8_t apTxPower,
 		uint8_t iniTxPower);
 uint8_t lim_is_addr_bc(tSirMacAddr);
 uint8_t lim_is_group_addr(tSirMacAddr);
-
-/* check for type of scan allowed */
-uint8_t lim_active_scan_allowed(tpAniSirGlobal, uint8_t);
 
 /* AID pool management functions */
 void lim_init_peer_idxpool(tpAniSirGlobal, tpPESession);
@@ -560,7 +548,7 @@ typedef enum {
 	WLAN_PE_DIAG_DEAUTH_CNF_EVENT,
 	WLAN_PE_DIAG_ADDTS_REQ_EVENT,
 	WLAN_PE_DIAG_ADDTS_RSP_EVENT = 30,
-	WLAN_PE_DIAG_DELTS_REQ_EVENT ,
+	WLAN_PE_DIAG_DELTS_REQ_EVENT,
 	WLAN_PE_DIAG_DELTS_RSP_EVENT,
 	WLAN_PE_DIAG_DELTS_IND_EVENT,
 	WLAN_PE_DIAG_ENTER_BMPS_REQ_EVENT,
@@ -574,7 +562,7 @@ typedef enum {
 	WLAN_PE_DIAG_EXIT_IMPS_RSP_EVENT,
 	WLAN_PE_DIAG_ENTER_UAPSD_REQ_EVENT,
 	WLAN_PE_DIAG_ENTER_UAPSD_RSP_EVENT,
-	WLAN_PE_DIAG_EXIT_UAPSD_REQ_EVENT ,
+	WLAN_PE_DIAG_EXIT_UAPSD_REQ_EVENT,
 	WLAN_PE_DIAG_EXIT_UAPSD_RSP_EVENT,
 	WLAN_PE_DIAG_WOWL_ADD_BCAST_PTRN_EVENT,
 	WLAN_PE_DIAG_WOWL_DEL_BCAST_PTRN_EVENT,

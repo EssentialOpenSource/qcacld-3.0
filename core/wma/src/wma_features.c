@@ -1003,9 +1003,9 @@ WLAN_PHY_MODE wma_chan_phy_mode(u8 chan, enum phy_ch_width chan_width,
 				break;
 			}
 		}
-	} else if (CDS_IS_CHANNEL_DSRC(chan))
+	} else if (cds_is_dsrc_channel(cds_chan_to_freq(chan))) {
 		phymode = MODE_11A;
-	else {
+	} else {
 		if (((CH_WIDTH_5MHZ == chan_width) ||
 		     (CH_WIDTH_10MHZ == chan_width)) &&
 		    ((WNI_CFG_DOT11_MODE_11A == dot11_mode) ||
@@ -1541,6 +1541,184 @@ static int wma_lphb_handler(tp_wma_handle wma, uint8_t *event)
 }
 #endif /* FEATURE_WLAN_LPHB */
 
+/**
+ * wma_is_ptrn_id_per_vdev() - Determine whether pattern id is unique per vdev
+ * @wma: wma handle
+ *
+ * Some legacy firmware can't set same pattern id to different
+ * vdevs, othwise overwrite each other, while some can set same
+ * pattern id to different vdevs, we happen to have this flag to
+ * differentiate them: WMI_SERVICE_UNIFIED_WOW_CAPABILITY
+ *
+ * Return: true if pattern id should unique per vdev,
+ *         false if pattern id should unique per pdev
+ */
+static inline bool wma_is_ptrn_id_per_vdev(tp_wma_handle wma)
+{
+	return WMI_SERVICE_IS_ENABLED(wma->wmi_service_bitmap,
+			WMI_SERVICE_UNIFIED_WOW_CAPABILITY);
+}
+
+/**
+ * wma_get_wow_default_ptrn() - Get default wow pattern count/id
+ * @wma: wma handle
+ * @vdev_id: vdev id
+ *
+ * API to get latest default pattern id to be set to vdev, and also the count
+ * of default patterns already set. If pattern id should be unique among vdevs,
+ * then ignore vdev_id and use a wma counter
+ *
+ * Return: default pattern count/id per vdev/pdev
+ */
+static uint8_t wma_get_wow_default_ptrn(tp_wma_handle wma, uint8_t vdev_id)
+{
+	struct wma_txrx_node *iface;
+
+	if (wma_is_ptrn_id_per_vdev(wma)) {
+		iface = &wma->interfaces[vdev_id];
+		return iface->num_wow_default_patterns;
+	} else {
+		return wma->wma_ptrn_id_def;
+	}
+}
+
+/**
+ * wma_get_and_increment_wow_default_ptrn - Get and increase wow default
+ *                                          pattern count/id
+ * @wma: wma handle
+ * @vdev_id: vdev id
+ *
+ * API to get latest default pattern id to be set to vdev, and then increase
+ * the vdev default pattern counter. If pattern id should be unique among
+ * vdevs, ignore vdev_id and use a wma counter
+ *
+ * Return: default pattern count/id per vdev/pdev
+ */
+static uint8_t
+wma_get_and_increment_wow_default_ptrn(tp_wma_handle wma, uint8_t vdev_id)
+{
+	uint8_t count;
+	struct wma_txrx_node *iface;
+
+	if (wma_is_ptrn_id_per_vdev(wma)) {
+		iface = &wma->interfaces[vdev_id];
+		count = iface->num_wow_default_patterns++;
+	} else {
+		count = wma->wma_ptrn_id_def++;
+	}
+	return count;
+}
+
+/**
+ * wma_decrement_wow_default_ptrn() - Decrease default wow pattern count/id
+ * @wma: wma handle
+ * @vdev_id: vdev id
+ *
+ * API to decrease default wow pattern id of vdev. If pattern id should be
+ * unique among vdevs, ignore vdev_id and use a wma counter
+ *
+ * Return: None
+ */
+static void wma_decrement_wow_default_ptrn(tp_wma_handle wma, uint8_t vdev_id)
+{
+	struct wma_txrx_node *iface;
+
+	if (wma_is_ptrn_id_per_vdev(wma)) {
+		iface = &wma->interfaces[vdev_id];
+		iface->num_wow_default_patterns--;
+	} else {
+		wma->wma_ptrn_id_def--;
+	}
+}
+
+/**
+ * wma_zero_wow_default_ptrn() - Set wow default pattern count zero
+ * @wma: wma handle
+ * @vdev_id: vdev id
+ *
+ * API to set zero of wow default pattern count. If pattern id should be
+ * unique among vdevs, ignore vdev_id and use a wma counter
+ *
+ * Return: None
+ */
+static void wma_zero_wow_default_ptrn(tp_wma_handle wma, uint8_t vdev_id)
+{
+	struct wma_txrx_node *iface;
+
+	if (wma_is_ptrn_id_per_vdev(wma)) {
+		iface = &wma->interfaces[vdev_id];
+		iface->num_wow_default_patterns = 0;
+	} else {
+		wma->wma_ptrn_id_def = 0;
+	}
+}
+
+/**
+ * wma_decrement_wow_user_ptrn() - Decrease wow user pattern count
+ * @wma: wma handle
+ * @vdev_id: vdev id
+ *
+ * API to decrease wow user pattern count. If pattern id should be
+ * unique among vdevs, ignore vdev_id and use a wma counter
+ *
+ * Return: None
+ */
+static void wma_decrement_wow_user_ptrn(tp_wma_handle wma, uint8_t vdev_id)
+{
+	struct wma_txrx_node *iface;
+
+	if (wma_is_ptrn_id_per_vdev(wma)) {
+		iface = &wma->interfaces[vdev_id];
+		iface->num_wow_user_patterns--;
+	} else {
+		wma->wma_ptrn_id_usr--;
+	}
+}
+
+/**
+ * wma_increment_wow_user_ptrn() - Increase wow user pattern count
+ * @wma: wma handle
+ * @vdev_id: vdev id
+ *
+ * API to increase wow user pattern count. If pattern id should be
+ * unique among vdevs, ignore vdev_id and use a wma counter
+ *
+ * Return: None
+ */
+static void wma_increment_wow_user_ptrn(tp_wma_handle wma, uint8_t vdev_id)
+{
+	struct wma_txrx_node *iface;
+
+	if (wma_is_ptrn_id_per_vdev(wma)) {
+		iface = &wma->interfaces[vdev_id];
+		iface->num_wow_user_patterns++;
+	} else {
+		wma->wma_ptrn_id_usr++;
+	}
+}
+
+/**
+ * wma_get_wow_user_ptrn() - Get wow user pattern count
+ * @wma: wma handle
+ * @vdev_id: vdev id
+ *
+ * API to get wow user pattern count set. If pattern id should be
+ * unique among vdevs, ignore vdev_id and use a wma counter
+ *
+ * Return: wow user pattern count of vdev/pdev
+ */
+static uint8_t wma_get_wow_user_ptrn(tp_wma_handle wma, uint8_t vdev_id)
+{
+	struct wma_txrx_node *iface;
+
+	if (wma_is_ptrn_id_per_vdev(wma)) {
+		iface = &wma->interfaces[vdev_id];
+		return iface->num_wow_user_patterns;
+	} else {
+		return wma->wma_ptrn_id_usr;
+	}
+}
+
 #ifdef FEATURE_WLAN_RA_FILTERING
 /**
  * wma_wow_sta_ra_filter() - set RA filter pattern in fw
@@ -1558,7 +1736,7 @@ static QDF_STATUS wma_wow_sta_ra_filter(tp_wma_handle wma, uint8_t vdev_id)
 
 	iface = &wma->interfaces[vdev_id];
 
-	default_pattern = iface->num_wow_default_patterns++;
+	default_pattern = wma_get_and_increment_wow_default_ptrn(wma, vdev_id);
 
 	WMA_LOGD("%s: send RA rate limit [%d] to fw vdev = %d", __func__,
 		 wma->RArateLimitInterval, vdev_id);
@@ -1567,7 +1745,7 @@ static QDF_STATUS wma_wow_sta_ra_filter(tp_wma_handle wma, uint8_t vdev_id)
 				   default_pattern, wma->RArateLimitInterval);
 	if (ret) {
 		WMA_LOGE("%s: Failed to send RA rate limit to fw", __func__);
-		iface->num_wow_default_patterns--;
+		wma_decrement_wow_default_ptrn(wma, vdev_id);
 		return QDF_STATUS_E_FAILURE;
 	}
 
@@ -1576,6 +1754,33 @@ static QDF_STATUS wma_wow_sta_ra_filter(tp_wma_handle wma, uint8_t vdev_id)
 }
 #endif /* FEATURE_WLAN_RA_FILTERING */
 
+/**
+ * wma_wow_set_wake_time() - set timer pattern tlv, so that firmware will wake
+ * up host after specified time is elapsed
+ * @wma_handle: wma handle
+ * @vdev_id: vdev id
+ * @cookie: value to identify reason why host set up wake call.
+ * @time: time in ms
+ *
+ * Return: QDF status
+ */
+QDF_STATUS wma_wow_set_wake_time(WMA_HANDLE wma_handle, uint8_t vdev_id,
+				 uint32_t cookie, uint32_t time)
+{
+	int ret;
+	tp_wma_handle wma = (tp_wma_handle)wma_handle;
+
+	WMA_LOGD(FL("send timer patter with time: %d and vdev = %d to fw"),
+		 time, vdev_id);
+	ret = wmi_unified_wow_timer_pattern_cmd(wma->wmi_handle, vdev_id,
+						cookie, time);
+	if (ret) {
+		WMA_LOGE(FL("Failed to send timer patter to fw"));
+		return QDF_STATUS_E_FAILURE;
+	}
+
+	return QDF_STATUS_SUCCESS;
+}
 /**
  * wmi_unified_nat_keepalive_enable() - enable NAT keepalive filter
  * @wma: wma handle
@@ -1950,6 +2155,11 @@ static QDF_STATUS dfs_phyerr_offload_event_handler(void *handle,
 		WMA_LOGE("%s: dfs is  NULL ", __func__);
 		return QDF_STATUS_E_FAILURE;
 	}
+
+	if (!is_dfs_radar_enable(ic)) {
+		WMA_LOGD("%s: DFS_AR_EN not enabled", __func__);
+		return QDF_STATUS_E_FAILURE;
+	}
 	/*
 	 * This parameter holds the number
 	 * of phyerror interrupts to the host
@@ -1987,7 +2197,7 @@ static QDF_STATUS dfs_phyerr_offload_event_handler(void *handle,
 			is_ch_dfs = true;
 	}
 	if (!is_ch_dfs) {
-		WMA_LOGE("%s: Invalid DFS Phyerror event. Channel=%d is Non-DFS",
+		WMA_LOGD("%s: Invalid DFS Phyerror event. Channel=%d is Non-DFS",
 			__func__, chan->ic_ieee);
 		qdf_spin_unlock_bh(&ic->chan_lock);
 		return QDF_STATUS_E_FAILURE;
@@ -2051,8 +2261,13 @@ static QDF_STATUS dfs_phyerr_offload_event_handler(void *handle,
 
 	/*
 	 * Index of peak magnitude
+	 * To do:
+	 * Need change interface of WMI_DFS_RADAR_EVENTID to get delta_diff and
+	 * delta_peak when DFS Phyerr filtering offload is enabled.
 	 */
-	event->sidx = radar_event->peak_sidx;
+	event->sidx = radar_event->peak_sidx & 0x0000ffff;
+	event->delta_diff = 0;
+	event->delta_peak = 0;
 	event->re_flags = 0;
 
 	/*
@@ -2162,8 +2377,9 @@ static QDF_STATUS dfs_phyerr_no_offload_event_handler(void *handle,
 		max_dfs_buf_length = DFS_MAX_BUF_LENGTH;
 
 	if (pe_hdr->buf_len > max_dfs_buf_length) {
-		WMA_LOGE("%s: Received Invalid Phyerror event buffer length = %d Maximum allowed buf length = %d",
-			__func__, pe_hdr->buf_len, max_dfs_buf_length);
+		wma_log_rate_limit_err(
+		16, "%s: Invalid Phyerr evt buf len %d Max allowed buf len %d",
+		__func__, pe_hdr->buf_len, max_dfs_buf_length);
 
 		return QDF_STATUS_E_FAILURE;
 	}
@@ -4745,6 +4961,23 @@ int wma_wow_wakeup_host_event(void *handle, uint8_t *event,
 		/* Just update stats and exit */
 		WMA_LOGD("Host woken up because of chip power save failure");
 		break;
+	case WOW_REASON_TIMER_INTR_RECV:
+		/*
+		 * Right now firmware is not returning any cookie host has
+		 * programmed. So do not check for cookie.
+		 */
+		WMA_LOGE("WOW_REASON_TIMER_INTR_RECV received, indicating key exchange did not finish. Initiate disconnect");
+		if (param_buf->wow_packet_buffer) {
+			WMA_LOGD("wow_packet_buffer dump");
+			qdf_trace_hex_dump(QDF_MODULE_ID_WMA,
+				QDF_TRACE_LEVEL_DEBUG,
+				param_buf->wow_packet_buffer, wow_buf_pkt_len);
+			wma_peer_sta_kickout_event_handler(handle,
+				wmi_cmd_struct_ptr, wow_buf_pkt_len);
+		} else {
+		    WMA_LOGD("No wow_packet_buffer present");
+		}
+		break;
 	default:
 		break;
 	}
@@ -4868,12 +5101,12 @@ static QDF_STATUS wma_send_wow_patterns_to_fw(tp_wma_handle wma,
 				mask_len, user, 0);
 	if (ret) {
 		if (!user)
-			iface->num_wow_default_patterns--;
+			wma_decrement_wow_default_ptrn(wma, vdev_id);
 		return QDF_STATUS_E_FAILURE;
 	}
 
 	if (user)
-		iface->num_wow_user_patterns++;
+		wma_increment_wow_user_ptrn(wma, vdev_id);
 
 	return QDF_STATUS_SUCCESS;
 }
@@ -4892,7 +5125,6 @@ static QDF_STATUS wma_wow_ap(tp_wma_handle wma, uint8_t vdev_id)
 	QDF_STATUS ret;
 	uint8_t arp_offset = 20;
 	uint8_t mac_mask[IEEE80211_ADDR_LEN];
-	struct wma_txrx_node *iface = &wma->interfaces[vdev_id];
 
 	/*
 	 * Setup unicast pkt pattern
@@ -4901,10 +5133,10 @@ static QDF_STATUS wma_wow_ap(tp_wma_handle wma, uint8_t vdev_id)
 	 */
 	qdf_mem_set(&mac_mask, IEEE80211_ADDR_LEN, 0xFF);
 	ret = wma_send_wow_patterns_to_fw(wma, vdev_id,
-				iface->num_wow_default_patterns++,
-				wma->interfaces[vdev_id].addr,
-				IEEE80211_ADDR_LEN, 0, mac_mask,
-				IEEE80211_ADDR_LEN, false);
+			wma_get_and_increment_wow_default_ptrn(wma, vdev_id),
+			wma->interfaces[vdev_id].addr,
+			IEEE80211_ADDR_LEN, 0, mac_mask,
+			IEEE80211_ADDR_LEN, false);
 	if (ret != QDF_STATUS_SUCCESS) {
 		WMA_LOGE("Failed to add WOW unicast pattern ret %d", ret);
 		return ret;
@@ -4915,7 +5147,7 @@ static QDF_STATUS wma_wow_ap(tp_wma_handle wma, uint8_t vdev_id)
 	 * is zero. Pattern ID should be unique per vdev.
 	 */
 	ret = wma_send_wow_patterns_to_fw(wma, vdev_id,
-			iface->num_wow_default_patterns++,
+			wma_get_and_increment_wow_default_ptrn(wma, vdev_id),
 			arp_ptrn, 0, arp_offset, arp_mask, 0, false);
 	if (ret != QDF_STATUS_SUCCESS) {
 		WMA_LOGE("Failed to add WOW ARP pattern ret %d", ret);
@@ -4938,16 +5170,15 @@ static QDF_STATUS wma_configure_wow_ssdp(tp_wma_handle wma, uint8_t vdev_id)
 {
 	QDF_STATUS status = QDF_STATUS_SUCCESS;
 	uint8_t discvr_offset = 30;
-	struct wma_txrx_node *iface = &wma->interfaces[vdev_id];
 
 	/*
 	 * WoW pattern ID should be unique for each vdev
 	 * Different WoW patterns can use same pattern ID
 	 */
 	 status = wma_send_wow_patterns_to_fw(wma, vdev_id,
-				iface->num_wow_default_patterns++,
-				discvr_ptrn, sizeof(discvr_ptrn), discvr_offset,
-				discvr_mask, sizeof(discvr_ptrn), false);
+			wma_get_and_increment_wow_default_ptrn(wma, vdev_id),
+			discvr_ptrn, sizeof(discvr_ptrn), discvr_offset,
+			discvr_mask, sizeof(discvr_ptrn), false);
 
 	if (status != QDF_STATUS_SUCCESS)
 		WMA_LOGE("Failed to add WOW mDNS/SSDP/LLMNR pattern");
@@ -5078,6 +5309,8 @@ QDF_STATUS wma_register_action_frame_patterns(WMA_HANDLE handle,
 	cmd->action_category_map[i++] = ALLOWED_ACTION_FRAMES_BITMAP7;
 
 	set_action_id_drop_pattern_for_spec_mgmt(cmd->action_per_category);
+	cmd->action_per_category[SIR_MAC_ACTION_PUBLIC_USAGE] =
+			DROP_PUBLIC_ACTION_FRAME_BITMAP;
 
 	for (i = 0; i < WMI_SUPPORTED_ACTION_CATEGORY_ELE_LIST; i++) {
 		if (i < ALLOWED_ACTION_FRAME_MAP_WORDS)
@@ -5089,6 +5322,8 @@ QDF_STATUS wma_register_action_frame_patterns(WMA_HANDLE handle,
 
 	WMA_LOGD("Spectrum mgmt action id drop bitmap: 0x%x",
 			cmd->action_per_category[SIR_MAC_ACTION_SPECTRUM_MGMT]);
+	WMA_LOGD("Public action id drop bitmap: 0x%x",
+			cmd->action_per_category[SIR_MAC_ACTION_PUBLIC_USAGE]);
 
 	err = wmi_unified_action_frame_patterns_cmd(wma->wmi_handle, cmd);
 	if (err) {
@@ -5115,7 +5350,6 @@ static QDF_STATUS wma_wow_sta(tp_wma_handle wma, uint8_t vdev_id)
 	uint8_t arp_offset = 12;
 	uint8_t mac_mask[IEEE80211_ADDR_LEN];
 	QDF_STATUS ret = QDF_STATUS_SUCCESS;
-	struct wma_txrx_node *iface = &wma->interfaces[vdev_id];
 
 	qdf_mem_set(&mac_mask, IEEE80211_ADDR_LEN, 0xFF);
 	/*
@@ -5124,10 +5358,10 @@ static QDF_STATUS wma_wow_sta(tp_wma_handle wma, uint8_t vdev_id)
 	 * Different WoW patterns can use same pattern ID
 	 */
 	ret = wma_send_wow_patterns_to_fw(wma, vdev_id,
-				iface->num_wow_default_patterns++,
-				wma->interfaces[vdev_id].addr,
-				IEEE80211_ADDR_LEN, 0, mac_mask,
-				IEEE80211_ADDR_LEN, false);
+			wma_get_and_increment_wow_default_ptrn(wma, vdev_id),
+			wma->interfaces[vdev_id].addr,
+			IEEE80211_ADDR_LEN, 0, mac_mask,
+			IEEE80211_ADDR_LEN, false);
 	if (ret != QDF_STATUS_SUCCESS) {
 		WMA_LOGE("Failed to add WOW unicast pattern ret %d", ret);
 		return ret;
@@ -5145,9 +5379,9 @@ static QDF_STATUS wma_wow_sta(tp_wma_handle wma, uint8_t vdev_id)
 		/* Setup all ARP pkt pattern */
 		WMA_LOGD("ARP offload is disabled in INI enable WoW for ARP");
 		ret = wma_send_wow_patterns_to_fw(wma, vdev_id,
-				iface->num_wow_default_patterns++,
-				arp_ptrn, sizeof(arp_ptrn), arp_offset,
-				arp_mask, sizeof(arp_mask), false);
+			wma_get_and_increment_wow_default_ptrn(wma, vdev_id),
+			arp_ptrn, sizeof(arp_ptrn), arp_offset,
+			arp_mask, sizeof(arp_mask), false);
 		if (ret != QDF_STATUS_SUCCESS) {
 			WMA_LOGE("Failed to add WOW ARP pattern");
 			return ret;
@@ -5159,9 +5393,9 @@ static QDF_STATUS wma_wow_sta(tp_wma_handle wma, uint8_t vdev_id)
 		/* Setup all NS pkt pattern */
 		WMA_LOGD("NS offload is disabled in INI enable WoW for NS");
 		ret = wma_send_wow_patterns_to_fw(wma, vdev_id,
-				iface->num_wow_default_patterns++,
-				ns_ptrn, sizeof(arp_ptrn), arp_offset,
-				arp_mask, sizeof(arp_mask), false);
+			wma_get_and_increment_wow_default_ptrn(wma, vdev_id),
+			ns_ptrn, sizeof(arp_ptrn), arp_offset,
+			arp_mask, sizeof(arp_mask), false);
 		if (ret != QDF_STATUS_SUCCESS) {
 			WMA_LOGE("Failed to add WOW NS pattern");
 			return ret;
@@ -5248,7 +5482,8 @@ void wma_register_wow_wakeup_events(WMA_HANDLE handle,
 
 		if ((wma->interfaces[vdev_id].in_bmps == true ||
 		     wma->in_imps == true) &&
-		     wma->auto_power_save_enabled)
+		    (wma->auto_power_save_enabled ==
+		     CDS_FW_TO_SEND_WOW_IND_ON_PWR_FAILURE))
 			wma_set_wow_event_bitmap(
 					 WOW_CHIP_POWER_FAILURE_DETECT_EVENT,
 					 WMI_WOW_MAX_EVENT_BM_LEN,
@@ -5350,7 +5585,7 @@ QDF_STATUS wma_enable_d0wow_in_fw(WMA_HANDLE handle)
 		return status;
 	}
 
-	status = qdf_wait_single_event(&wma->target_suspend,
+	status = qdf_wait_for_event_completion(&wma->target_suspend,
 		WMA_TGT_SUSPEND_COMPLETE_TIMEOUT);
 	if (QDF_IS_STATUS_ERROR(status)) {
 		WMA_LOGE("Failed to receive D0-WoW enable HTC ACK from FW! "
@@ -5450,7 +5685,7 @@ QDF_STATUS wma_enable_wow_in_fw(WMA_HANDLE handle, uint32_t wow_flags)
 
 	wmi_set_target_suspend(wma->wmi_handle, true);
 
-	if (qdf_wait_single_event(&wma->target_suspend,
+	if (qdf_wait_for_event_completion(&wma->target_suspend,
 				  WMA_TGT_SUSPEND_COMPLETE_TIMEOUT)
 	    != QDF_STATUS_SUCCESS) {
 		WMA_LOGE("Failed to receive WoW Enable Ack from FW");
@@ -5553,17 +5788,15 @@ static QDF_STATUS wma_wow_delete_pattern(tp_wma_handle wma, uint8_t ptrn_id,
 					uint8_t vdev_id, bool user)
 {
 
-	struct wma_txrx_node *iface;
 	int ret;
 
-	iface = &wma->interfaces[vdev_id];
 	ret = wmi_unified_wow_delete_pattern_cmd(wma->wmi_handle, ptrn_id,
 				   vdev_id);
 	if (ret)
 		return QDF_STATUS_E_FAILURE;
 
 	if (user)
-		iface->num_wow_user_patterns--;
+		wma_decrement_wow_user_ptrn(wma, vdev_id);
 
 	return QDF_STATUS_SUCCESS;
 }
@@ -5584,9 +5817,8 @@ static QDF_STATUS wma_wow_delete_pattern(tp_wma_handle wma, uint8_t ptrn_id,
  */
 QDF_STATUS wma_wow_add_pattern(tp_wma_handle wma, struct wow_add_pattern *ptrn)
 {
-	uint8_t id;
+	uint8_t id, vdev_id;
 	uint8_t bit_to_check, pos;
-	struct wma_txrx_node *iface;
 	QDF_STATUS ret = QDF_STATUS_SUCCESS;
 	uint8_t new_mask[SIR_WOWL_BCAST_PATTERN_MAX_SIZE];
 
@@ -5595,13 +5827,13 @@ QDF_STATUS wma_wow_add_pattern(tp_wma_handle wma, struct wow_add_pattern *ptrn)
 		return QDF_STATUS_E_INVAL;
 	}
 
-	iface = &wma->interfaces[ptrn->session_id];
+	vdev_id = ptrn->session_id;
 
 	/* clear all default patterns cofigured by wma */
-	for (id = 0; id < iface->num_wow_default_patterns; id++)
-		wma_wow_delete_pattern(wma, id, ptrn->session_id, false);
+	for (id = 0; id < wma_get_wow_default_ptrn(wma, vdev_id); id++)
+		wma_wow_delete_pattern(wma, id, vdev_id, false);
 
-	iface->num_wow_default_patterns = 0;
+	wma_zero_wow_default_ptrn(wma, vdev_id);
 
 	WMA_LOGD("Add user passed wow pattern id %d vdev id %d",
 		ptrn->pattern_id, ptrn->session_id);
@@ -5657,29 +5889,29 @@ QDF_STATUS wma_wow_add_pattern(tp_wma_handle wma, struct wow_add_pattern *ptrn)
 QDF_STATUS wma_wow_delete_user_pattern(tp_wma_handle wma,
 					struct wow_delete_pattern *pattern)
 {
-	struct wma_txrx_node *iface;
+	uint8_t vdev_id, count;
 
 	if (pattern->session_id >= wma->max_bssid) {
 		WMA_LOGE("Invalid vdev id %d", pattern->session_id);
 		return QDF_STATUS_E_INVAL;
 	}
 
-	iface = &wma->interfaces[pattern->session_id];
-	if (iface->num_wow_user_patterns <= 0) {
+	vdev_id = pattern->session_id;
+	count = wma_get_wow_user_ptrn(wma, vdev_id);
+	if (count <= 0) {
 		WMA_LOGE("No valid user pattern. Num user pattern %u vdev %d",
-			iface->num_wow_user_patterns, pattern->session_id);
+			count, vdev_id);
 		return QDF_STATUS_E_INVAL;
 	}
 
 	WMA_LOGD("Delete user passed wow pattern id %d total user pattern %d",
-		pattern->pattern_id, iface->num_wow_user_patterns);
+		pattern->pattern_id, count);
 
-	wma_wow_delete_pattern(wma, pattern->pattern_id,
-				pattern->session_id, true);
+	wma_wow_delete_pattern(wma, pattern->pattern_id, vdev_id, true);
 
 	/* configure default patterns once all user patterns are deleted */
-	if (!iface->num_wow_user_patterns)
-		wma_register_wow_default_patterns(wma, pattern->session_id);
+	if (!wma_get_wow_user_ptrn(wma, vdev_id))
+		wma_register_wow_default_patterns(wma, vdev_id);
 
 	return QDF_STATUS_SUCCESS;
 }
@@ -6089,7 +6321,8 @@ static void wma_configure_dynamic_wake_events(tp_wma_handle wma)
 		      WMI_UNIFIED_VDEV_SUBTYPE_P2P_DEVICE ||
 		      wma->interfaces[vdev_id].sub_type ==
 		      WMI_UNIFIED_VDEV_SUBTYPE_P2P_CLIENT))) &&
-		     wma->auto_power_save_enabled) {
+		     (wma->auto_power_save_enabled ==
+		      CDS_FW_TO_SEND_WOW_IND_ON_PWR_FAILURE)) {
 			wma_set_wow_event_bitmap(EV_PWR,
 						 BM_LEN,
 						 enable_mask);
@@ -6215,7 +6448,7 @@ static QDF_STATUS wma_send_host_wakeup_ind_to_fw(tp_wma_handle wma)
 
 	WMA_LOGD("Host wakeup indication sent to fw");
 
-	qdf_status = qdf_wait_single_event(&(wma->wma_resume_event),
+	qdf_status = qdf_wait_for_event_completion(&(wma->wma_resume_event),
 					   WMA_RESUME_TIMEOUT);
 	if (QDF_STATUS_SUCCESS != qdf_status) {
 		WMA_LOGP("%s: Timeout waiting for resume event from FW",
@@ -6271,7 +6504,7 @@ QDF_STATUS wma_disable_d0wow_in_fw(WMA_HANDLE handle)
 		return status;
 	}
 
-	status = qdf_wait_single_event(&(wma->wma_resume_event),
+	status = qdf_wait_for_event_completion(&(wma->wma_resume_event),
 				WMA_RESUME_TIMEOUT);
 	if (QDF_IS_STATUS_ERROR(status)) {
 		WMA_LOGP("%s: Timeout waiting for resume event from FW!",
@@ -7155,28 +7388,18 @@ QDF_STATUS wma_enable_arp_ns_offload(tp_wma_handle wma,
 }
 
 QDF_STATUS wma_conf_hw_filter_mode(tp_wma_handle wma,
-				   struct hw_filter_request *req)
+				   struct wmi_hw_filter_req_params *req)
 {
 	QDF_STATUS status;
-	uint8_t vdev_id;
 
-	/* Get the vdev id */
-	if (!wma_find_vdev_by_bssid(wma, req->bssid.bytes, &vdev_id)) {
-		WMA_LOGE("vdev handle is invalid for %pM",
-			 req->bssid.bytes);
-		qdf_mem_free(req);
-		return QDF_STATUS_E_INVAL;
-	}
-
-	if (!wma->interfaces[vdev_id].vdev_up) {
+	if (!wma->interfaces[req->vdev_id].vdev_up) {
 		WMA_LOGE("vdev %d is not up skipping enable Broadcast Filter",
-			 vdev_id);
+			 req->vdev_id);
 		qdf_mem_free(req);
 		return QDF_STATUS_E_FAILURE;
 	}
 
-	status = wmi_unified_conf_hw_filter_mode_cmd(wma->wmi_handle, vdev_id,
-						     req->mode_bitmap);
+	status = wmi_unified_conf_hw_filter_mode_cmd(wma->wmi_handle, req);
 	if (QDF_IS_STATUS_ERROR(status))
 		WMA_LOGE("Failed to enable/disable Broadcast Filter");
 
@@ -8113,7 +8336,7 @@ void wma_send_regdomain_info_to_fw(uint32_t reg_dmn, uint16_t regdmn2G,
 	if (status == QDF_STATUS_E_NOMEM)
 		return;
 
-	if ((((reg_dmn & ~CTRY_FLAG) == CTRY_JAPAN14) ||
+	if ((((reg_dmn & ~CTRY_FLAG) == CTRY_JAPAN15) ||
 	     ((reg_dmn & ~CTRY_FLAG) == CTRY_KOREA_ROC)) &&
 	    (true == wma->tx_chain_mask_cck))
 		cck_mask_val = 1;
@@ -8183,7 +8406,7 @@ static QDF_STATUS wma_post_runtime_suspend_msg(WMA_HANDLE handle)
 	if (qdf_status != QDF_STATUS_SUCCESS)
 		goto failure;
 
-	if (qdf_wait_single_event(&wma->runtime_suspend,
+	if (qdf_wait_for_event_completion(&wma->runtime_suspend,
 			WMA_TGT_SUSPEND_COMPLETE_TIMEOUT) !=
 			QDF_STATUS_SUCCESS) {
 		WMA_LOGE("Failed to get runtime suspend event");
@@ -8196,6 +8419,45 @@ msg_timed_out:
 	wma_post_runtime_resume_msg(wma);
 failure:
 	return QDF_STATUS_E_AGAIN;
+}
+
+/**
+ * wma_check_and_set_wake_timer(): checks all interfaces and if any interface
+ * has install_key pending, sets timer pattern in fw to wake up host after
+ * specified time has elapsed.
+ * @wma: wma handle
+ * @time: time after which host wants to be awaken.
+ *
+ * Return: None
+ */
+static void wma_check_and_set_wake_timer(tp_wma_handle wma, uint32_t time)
+{
+	int i;
+	bool is_set_key_in_progress = false;
+	struct wma_txrx_node *iface;
+
+	if (!WMI_SERVICE_EXT_IS_ENABLED(wma->wmi_service_bitmap,
+		wma->wmi_service_ext_bitmap,
+		WMI_SERVICE_WOW_WAKEUP_BY_TIMER_PATTERN)) {
+		WMA_LOGD("TIME_PATTERN is not enabled");
+		return;
+	}
+
+	for (i = 0; i < wma->max_bssid; i++) {
+		iface = &wma->interfaces[i];
+		if (iface->is_vdev_valid && iface->is_waiting_for_key) {
+			/*
+			 * right now cookie is dont care, since FW disregards
+			 * that.
+			 */
+			is_set_key_in_progress = true;
+			wma_wow_set_wake_time((WMA_HANDLE)wma, i, 0, time);
+			break;
+		}
+	}
+
+	if (!is_set_key_in_progress)
+		WMA_LOGD("set key not in progress for any vdev");
 }
 
 /**
@@ -8262,6 +8524,7 @@ static int __wma_bus_suspend(enum qdf_suspend_type type, uint32_t wow_flags)
 		return qdf_status_to_os_return(status);
 	}
 
+	wma_check_and_set_wake_timer(handle, SIR_INSTALL_KEY_TIMEOUT_MS);
 	status = wma_enable_wow_in_fw(handle, wow_flags);
 
 	return qdf_status_to_os_return(status);
@@ -8417,6 +8680,8 @@ static inline void wma_suspend_target_timeout(bool is_self_recovery_enabled)
 	else if (cds_is_driver_in_bad_state())
 		WMA_LOGE("%s: Module in bad state; Ignoring suspend timeout",
 			 __func__);
+	else if (cds_is_fw_down())
+		WMA_LOGE(FL("FW is down; Ignoring suspend timeout"));
 	else
 		cds_trigger_recovery(CDS_SUSPEND_TIMEOUT);
 }
@@ -8456,7 +8721,7 @@ QDF_STATUS wma_suspend_target(WMA_HANDLE handle, int disable_target_intr)
 
 	wmi_set_target_suspend(wma_handle->wmi_handle, true);
 
-	if (qdf_wait_single_event(&wma_handle->target_suspend,
+	if (qdf_wait_for_event_completion(&wma_handle->target_suspend,
 				  WMA_TGT_SUSPEND_COMPLETE_TIMEOUT)
 	    != QDF_STATUS_SUCCESS) {
 		WMA_LOGE("Failed to get ACK from firmware for pdev suspend");
@@ -8522,6 +8787,7 @@ void wma_handle_initial_wake_up(void)
 int wma_is_target_wake_up_received(void)
 {
 	tp_wma_handle wma = cds_get_context(QDF_MODULE_ID_WMA);
+	int32_t event_count;
 
 	if (NULL == wma) {
 		WMA_LOGE("%s: wma is NULL", __func__);
@@ -8530,6 +8796,13 @@ int wma_is_target_wake_up_received(void)
 
 	if (wma->wow_initial_wake_up) {
 		WMA_LOGE("Target initial wake up received try again");
+		return -EAGAIN;
+	}
+
+	event_count = qdf_atomic_read(&wma->critical_events_in_flight);
+	if (event_count) {
+		WMA_LOGE("%d critical event(s) in flight; Try again",
+			 event_count);
 		return -EAGAIN;
 	}
 
@@ -8580,7 +8853,7 @@ QDF_STATUS wma_resume_target(WMA_HANDLE handle)
 	if (QDF_IS_STATUS_ERROR(qdf_status))
 		WMA_LOGE("Failed to send WMI_PDEV_RESUME_CMDID command");
 
-	qdf_status = qdf_wait_single_event(&(wma->wma_resume_event),
+	qdf_status = qdf_wait_for_event_completion(&(wma->wma_resume_event),
 			WMA_RESUME_TIMEOUT);
 	if (QDF_STATUS_SUCCESS != qdf_status) {
 		WMA_LOGP("%s: Timeout waiting for resume event from FW",
@@ -9500,21 +9773,13 @@ QDF_STATUS wma_process_set_ie_info(tp_wma_handle wma,
 	return ret;
 }
 
-/**
- *  wma_get_bpf_caps_event_handler() - Event handler for get bpf capability
- *  @handle: WMA global handle
- *  @cmd_param_info: command event data
- *  @len: Length of @cmd_param_info
- *
- *  Return: 0 on Success or Errno on failure
- */
-int wma_get_bpf_caps_event_handler(void *handle,
+int wma_get_apf_caps_event_handler(void *handle,
 			u_int8_t *cmd_param_info,
 			u_int32_t len)
 {
 	WMI_BPF_CAPABILIY_INFO_EVENTID_param_tlvs  *param_buf;
 	wmi_bpf_capability_info_evt_fixed_param *event;
-	struct sir_bpf_get_offload *bpf_get_offload;
+	struct sir_apf_get_offload *apf_get_offload;
 	tpAniSirGlobal pmac = (tpAniSirGlobal)cds_get_context(
 				QDF_MODULE_ID_PE);
 
@@ -9522,41 +9787,35 @@ int wma_get_bpf_caps_event_handler(void *handle,
 		WMA_LOGE("%s: Invalid pmac", __func__);
 		return -EINVAL;
 	}
-	if (!pmac->sme.pbpf_get_offload_cb) {
+	if (!pmac->sme.papf_get_offload_cb) {
 		WMA_LOGE("%s: Callback not registered", __func__);
 		return -EINVAL;
 	}
 
 	param_buf = (WMI_BPF_CAPABILIY_INFO_EVENTID_param_tlvs *)cmd_param_info;
 	event = param_buf->fixed_param;
-	bpf_get_offload = qdf_mem_malloc(sizeof(*bpf_get_offload));
+	apf_get_offload = qdf_mem_malloc(sizeof(*apf_get_offload));
 
-	if (!bpf_get_offload) {
+	if (!apf_get_offload) {
 		WMA_LOGP("%s: Memory allocation failed.", __func__);
 		return -ENOMEM;
 	}
 
-	bpf_get_offload->bpf_version = event->bpf_version;
-	bpf_get_offload->max_bpf_filters = event->max_bpf_filters;
-	bpf_get_offload->max_bytes_for_bpf_inst =
+	apf_get_offload->apf_version = event->bpf_version;
+	apf_get_offload->max_apf_filters = event->max_bpf_filters;
+	apf_get_offload->max_bytes_for_apf_inst =
 			event->max_bytes_for_bpf_inst;
-	WMA_LOGD("%s: BPF capabilities version: %d max bpf filter size: %d",
-			__func__, bpf_get_offload->bpf_version,
-	bpf_get_offload->max_bytes_for_bpf_inst);
+	WMA_LOGD("%s: APF capabilities version: %d max apf filter size: %d",
+			__func__, apf_get_offload->apf_version,
+	apf_get_offload->max_bytes_for_apf_inst);
 
-	WMA_LOGD("%s: sending bpf capabilities event to hdd", __func__);
-	pmac->sme.pbpf_get_offload_cb(pmac->hHdd, bpf_get_offload);
-	qdf_mem_free(bpf_get_offload);
+	WMA_LOGD("%s: sending apf capabilities event to hdd", __func__);
+	pmac->sme.papf_get_offload_cb(pmac->hHdd, apf_get_offload);
+	qdf_mem_free(apf_get_offload);
 	return 0;
 }
 
-/**
- * wma_get_bpf_capabilities - Send get bpf capability to firmware
- * @wma_handle: wma handle
- *
- * Return: QDF_STATUS enumeration.
- */
-QDF_STATUS wma_get_bpf_capabilities(tp_wma_handle wma)
+QDF_STATUS wma_get_apf_capabilities(tp_wma_handle wma)
 {
 	QDF_STATUS status = QDF_STATUS_SUCCESS;
 	wmi_bpf_get_capability_cmd_fixed_param *cmd;
@@ -9565,13 +9824,13 @@ QDF_STATUS wma_get_bpf_capabilities(tp_wma_handle wma)
 	u_int8_t *buf_ptr;
 
 	if (!wma || !wma->wmi_handle) {
-		WMA_LOGE(FL("WMA is closed, can not issue get BPF capab"));
+		WMA_LOGE(FL("WMA is closed, can not issue get APF capab"));
 		return QDF_STATUS_E_INVAL;
 	}
 
 	if (!WMI_SERVICE_IS_ENABLED(wma->wmi_service_bitmap,
 		WMI_SERVICE_BPF_OFFLOAD)) {
-		WMA_LOGE(FL("BPF cababilities feature bit not enabled"));
+		WMA_LOGE(FL("APF cababilities feature bit not enabled"));
 		return QDF_STATUS_E_FAILURE;
 	}
 
@@ -9591,22 +9850,15 @@ QDF_STATUS wma_get_bpf_capabilities(tp_wma_handle wma)
 
 	if (wmi_unified_cmd_send(wma->wmi_handle, wmi_buf, len,
 		WMI_BPF_GET_CAPABILITY_CMDID)) {
-		WMA_LOGE(FL("Failed to send BPF capability command"));
+		WMA_LOGE(FL("Failed to send APF capability command"));
 		wmi_buf_free(wmi_buf);
 		return QDF_STATUS_E_FAILURE;
 	}
 	return status;
 }
 
-/**
- *  wma_set_bpf_instructions - Set bpf instructions to firmware
- *  @wma: wma handle
- *  @bpf_set_offload: Bpf offload information to set to firmware
- *
- *  Return: QDF_STATUS enumeration
- */
-QDF_STATUS wma_set_bpf_instructions(tp_wma_handle wma,
-				struct sir_bpf_set_offload *bpf_set_offload)
+QDF_STATUS wma_set_apf_instructions(tp_wma_handle wma,
+				struct sir_apf_set_offload *apf_set_offload)
 {
 	wmi_bpf_set_vdev_instructions_cmd_fixed_param *cmd;
 	wmi_buf_t wmi_buf;
@@ -9614,36 +9866,36 @@ QDF_STATUS wma_set_bpf_instructions(tp_wma_handle wma,
 	u_int8_t *buf_ptr;
 
 	if (!wma || !wma->wmi_handle) {
-		WMA_LOGE("%s: WMA is closed, can not issue set BPF capability",
+		WMA_LOGE("%s: WMA is closed, can not issue set APF capability",
 			__func__);
 		return QDF_STATUS_E_INVAL;
 	}
 
 	if (!WMI_SERVICE_IS_ENABLED(wma->wmi_service_bitmap,
 		WMI_SERVICE_BPF_OFFLOAD)) {
-		WMA_LOGE(FL("BPF offload feature Disabled"));
+		WMA_LOGE(FL("APF offload feature Disabled"));
 		return QDF_STATUS_E_NOSUPPORT;
 	}
 
-	if (!bpf_set_offload) {
-		WMA_LOGE("%s: Invalid BPF instruction request", __func__);
+	if (!apf_set_offload) {
+		WMA_LOGE("%s: Invalid APF instruction request", __func__);
 		return QDF_STATUS_E_INVAL;
 	}
 
-	if (bpf_set_offload->session_id >= wma->max_bssid) {
+	if (apf_set_offload->session_id >= wma->max_bssid) {
 		WMA_LOGE(FL("Invalid vdev_id: %d"),
-			bpf_set_offload->session_id);
+			apf_set_offload->session_id);
 		return QDF_STATUS_E_INVAL;
 	}
 
-	if (!wma->interfaces[bpf_set_offload->session_id].vdev_up) {
-		WMA_LOGE("vdev %d is not up skipping BPF offload",
-			bpf_set_offload->session_id);
+	if (!wma->interfaces[apf_set_offload->session_id].vdev_up) {
+		WMA_LOGE("vdev %d is not up skipping APF offload",
+			apf_set_offload->session_id);
 		return QDF_STATUS_E_INVAL;
 	}
 
-	if (bpf_set_offload->total_length) {
-		len_aligned = roundup(bpf_set_offload->current_length,
+	if (apf_set_offload->total_length) {
+		len_aligned = roundup(apf_set_offload->current_length,
 					sizeof(A_UINT32));
 		len = len_aligned + WMI_TLV_HDR_SIZE;
 	}
@@ -9662,30 +9914,163 @@ QDF_STATUS wma_set_bpf_instructions(tp_wma_handle wma,
 		WMITLV_TAG_STRUC_wmi_bpf_set_vdev_instructions_cmd_fixed_param,
 		WMITLV_GET_STRUCT_TLVLEN(
 			wmi_bpf_set_vdev_instructions_cmd_fixed_param));
-	cmd->vdev_id = bpf_set_offload->session_id;
-	cmd->filter_id = bpf_set_offload->filter_id;
-	cmd->total_length = bpf_set_offload->total_length;
-	cmd->current_offset = bpf_set_offload->current_offset;
-	cmd->current_length = bpf_set_offload->current_length;
+	cmd->vdev_id = apf_set_offload->session_id;
+	cmd->filter_id = apf_set_offload->filter_id;
+	cmd->total_length = apf_set_offload->total_length;
+	cmd->current_offset = apf_set_offload->current_offset;
+	cmd->current_length = apf_set_offload->current_length;
 
-	if (bpf_set_offload->total_length) {
+	if (apf_set_offload->total_length) {
 		buf_ptr +=
 			sizeof(wmi_bpf_set_vdev_instructions_cmd_fixed_param);
 		WMITLV_SET_HDR(buf_ptr, WMITLV_TAG_ARRAY_BYTE, len_aligned);
 		buf_ptr += WMI_TLV_HDR_SIZE;
-		qdf_mem_copy(buf_ptr, bpf_set_offload->program,
-					bpf_set_offload->current_length);
+		qdf_mem_copy(buf_ptr, apf_set_offload->program,
+					apf_set_offload->current_length);
 	}
 
 	if (wmi_unified_cmd_send(wma->wmi_handle, wmi_buf, len,
 		WMI_BPF_SET_VDEV_INSTRUCTIONS_CMDID)) {
-		WMA_LOGE(FL("Failed to send config bpf instructions command"));
+		WMA_LOGE(FL("Failed to send config apf instructions command"));
 		wmi_buf_free(wmi_buf);
 		return QDF_STATUS_E_FAILURE;
 	}
-	WMA_LOGD(FL("BPF offload enabled in fw"));
+	WMA_LOGD(FL("APF offload enabled in fw"));
 
 	return QDF_STATUS_SUCCESS;
+}
+
+QDF_STATUS wma_send_apf_enable_cmd(WMA_HANDLE handle, uint8_t vdev_id,
+				   bool apf_enable)
+{
+	QDF_STATUS status = QDF_STATUS_SUCCESS;
+	tp_wma_handle wma = (tp_wma_handle) handle;
+
+	if (!wma || !wma->wmi_handle) {
+		WMA_LOGE(FL("WMA is closed, can not issue get APF capab"));
+		return QDF_STATUS_E_INVAL;
+	}
+
+	if (!WMI_SERVICE_IS_ENABLED(wma->wmi_service_bitmap,
+		WMI_SERVICE_BPF_OFFLOAD)) {
+		WMA_LOGE(FL("APF cababilities feature bit not enabled"));
+		return QDF_STATUS_E_FAILURE;
+	}
+
+	status = wmi_unified_send_apf_enable_cmd(wma->wmi_handle, vdev_id,
+						 apf_enable);
+	if (QDF_IS_STATUS_ERROR(status)) {
+		WMA_LOGE("Failed to send apf enable/disable cmd");
+		return QDF_STATUS_E_FAILURE;
+	}
+
+	if (apf_enable)
+		WMA_LOGD("Sent APF Enable on vdevid: %d", vdev_id);
+	else
+		WMA_LOGD("Sent APF Disable on vdevid: %d", vdev_id);
+
+	return status;
+}
+
+QDF_STATUS
+wma_send_apf_write_work_memory_cmd(WMA_HANDLE handle,
+			struct wmi_apf_write_memory_params *write_params)
+{
+	QDF_STATUS status = QDF_STATUS_SUCCESS;
+	tp_wma_handle wma = (tp_wma_handle) handle;
+
+	if (!wma || !wma->wmi_handle) {
+		WMA_LOGE(FL("WMA is closed, can not issue write APF mem"));
+		return QDF_STATUS_E_INVAL;
+	}
+
+	if (!WMI_SERVICE_IS_ENABLED(wma->wmi_service_bitmap,
+		WMI_SERVICE_BPF_OFFLOAD)) {
+		WMA_LOGE(FL("APF cababilities feature bit not enabled"));
+		return QDF_STATUS_E_FAILURE;
+	}
+
+	if (wmi_unified_send_apf_write_work_memory_cmd(wma->wmi_handle,
+						       write_params)) {
+		WMA_LOGE(FL("Failed to send APF write mem command"));
+		return QDF_STATUS_E_FAILURE;
+	}
+
+	WMA_LOGD("Sent APF wite mem on vdevid: %d", write_params->vdev_id);
+	return status;
+}
+
+int wma_apf_read_work_memory_event_handler(void *handle, uint8_t *evt_buf,
+					   uint32_t len)
+{
+	tp_wma_handle wma_handle;
+	wmi_unified_t wmi_handle;
+	struct wmi_apf_read_memory_resp_event_params evt_params = {0};
+	QDF_STATUS status;
+	tpAniSirGlobal pmac = cds_get_context(QDF_MODULE_ID_PE);
+
+	WMA_LOGI(FL("handle:%pK event:%pK len:%u"), handle, evt_buf, len);
+
+	wma_handle = handle;
+	if (!wma_handle) {
+		WMA_LOGE(FL("NULL wma_handle"));
+		return -EINVAL;
+	}
+
+	wmi_handle = wma_handle->wmi_handle;
+	if (!wmi_handle) {
+		WMA_LOGE(FL("NULL wmi_handle"));
+		return -EINVAL;
+	}
+
+	if (!pmac) {
+		WMA_LOGE(FL("Invalid pmac"));
+		return -EINVAL;
+	}
+
+	if (!pmac->sme.apf_read_mem_cb) {
+		WMA_LOGE(FL("Callback not registered"));
+		return -EINVAL;
+	}
+
+	status = wmi_extract_apf_read_memory_resp_event(wmi_handle,
+						evt_buf, &evt_params);
+	if (QDF_IS_STATUS_ERROR(status)) {
+		WMA_LOGE(FL("Event extract failure: %d"), status);
+		return -EINVAL;
+	}
+
+	pmac->sme.apf_read_mem_cb(pmac->hHdd, &evt_params);
+
+	return 0;
+}
+
+QDF_STATUS wma_send_apf_read_work_memory_cmd(WMA_HANDLE handle,
+					    struct wmi_apf_read_memory_params
+								*read_params)
+{
+	QDF_STATUS status = QDF_STATUS_SUCCESS;
+	tp_wma_handle wma = (tp_wma_handle) handle;
+
+	if (!wma || !wma->wmi_handle) {
+		WMA_LOGE(FL("WMA is closed, can not issue read APF memory"));
+		return QDF_STATUS_E_INVAL;
+	}
+
+	if (!WMI_SERVICE_IS_ENABLED(wma->wmi_service_bitmap,
+		WMI_SERVICE_BPF_OFFLOAD)) {
+		WMA_LOGE(FL("APF cababilities feature bit not enabled"));
+		return QDF_STATUS_E_FAILURE;
+	}
+
+	if (wmi_unified_send_apf_read_work_memory_cmd(wma->wmi_handle,
+						      read_params)) {
+		WMA_LOGE(FL("Failed to send APF read memory command"));
+		return QDF_STATUS_E_FAILURE;
+	}
+
+	WMA_LOGD("Sent APF read memory on vdevid: %d", read_params->vdev_id);
+	return status;
 }
 
 /**
@@ -10075,6 +10460,107 @@ QDF_STATUS wma_enable_disable_caevent_ind(tp_wma_handle wma, uint8_t val)
 	}
 
 	return QDF_STATUS_SUCCESS;
+}
+
+static wma_sar_cb sar_callback;
+static void *sar_context;
+
+static int wma_sar_event_handler(void *handle, uint8_t *evt_buf, uint32_t len)
+{
+	tp_wma_handle wma_handle;
+	wmi_unified_t wmi_handle;
+	struct sar_limit_event *event;
+	wma_sar_cb callback;
+	QDF_STATUS status;
+
+	WMA_LOGI(FL("handle:%pK event:%pK len:%u"), handle, evt_buf, len);
+
+	wma_handle = handle;
+	if (!wma_handle) {
+		WMA_LOGE(FL("NULL wma_handle"));
+		return QDF_STATUS_E_INVAL;
+	}
+
+	wmi_handle = wma_handle->wmi_handle;
+	if (!wmi_handle) {
+		WMA_LOGE(FL("NULL wmi_handle"));
+		return QDF_STATUS_E_INVAL;
+	}
+
+	event = qdf_mem_malloc(sizeof(*event));
+	if (!event) {
+		WMA_LOGE(FL("failed to malloc sar_limit_event"));
+		return QDF_STATUS_E_NOMEM;
+	}
+
+	status = wmi_unified_extract_sar_limit_event(wmi_handle,
+						     evt_buf, event);
+	if (QDF_IS_STATUS_ERROR(status)) {
+		WMA_LOGE(FL("Event extract failure: %d"), status);
+		qdf_mem_free(event);
+		return QDF_STATUS_E_INVAL;
+	}
+
+	callback = sar_callback;
+	sar_callback = NULL;
+	if (callback)
+		callback(sar_context, event);
+
+	qdf_mem_free(event);
+
+	return 0;
+}
+
+QDF_STATUS wma_sar_register_event_handlers(WMA_HANDLE handle)
+{
+	tp_wma_handle wma_handle = handle;
+	wmi_unified_t wmi_handle;
+
+	if (!wma_handle) {
+		WMA_LOGE(FL("NULL wma_handle"));
+		return QDF_STATUS_E_INVAL;
+	}
+
+	wmi_handle = wma_handle->wmi_handle;
+	if (!wmi_handle) {
+		WMA_LOGE(FL("NULL wmi_handle"));
+		return QDF_STATUS_E_INVAL;
+	}
+
+	return wmi_unified_register_event_handler(wmi_handle,
+						  WMI_SAR_GET_LIMITS_EVENTID,
+						  wma_sar_event_handler,
+						  WMA_RX_WORK_CTX);
+}
+
+QDF_STATUS wma_get_sar_limit(WMA_HANDLE handle,
+			     wma_sar_cb callback, void *context)
+{
+	tp_wma_handle wma_handle = handle;
+	wmi_unified_t wmi_handle;
+	QDF_STATUS status;
+
+	if (!wma_handle) {
+		WMA_LOGE(FL("NULL wma_handle"));
+		return QDF_STATUS_E_INVAL;
+	}
+
+	wmi_handle = wma_handle->wmi_handle;
+	if (!wmi_handle) {
+		WMA_LOGE(FL("NULL wmi_handle"));
+		return QDF_STATUS_E_INVAL;
+	}
+
+	sar_callback = callback;
+	sar_context = context;
+	status = wmi_unified_get_sar_limit_cmd(wmi_handle);
+	if (QDF_IS_STATUS_ERROR(status)) {
+		WMA_LOGE(FL("wmi_unified_get_sar_limit_cmd() error: %u"),
+			 status);
+		sar_callback = NULL;
+	}
+
+	return status;
 }
 
 QDF_STATUS wma_set_sar_limit(WMA_HANDLE handle,

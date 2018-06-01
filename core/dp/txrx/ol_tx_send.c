@@ -33,7 +33,7 @@
 
 #include <cds_queue.h>          /* TAILQ */
 #ifdef QCA_COMPUTE_TX_DELAY
-#include <ieee80211.h>          /* ieee80211_frame, etc. */
+#include <linux/ieee80211.h>          /* ieee80211_frame, etc. */
 #include <enet.h>               /* ethernet_hdr_t, etc. */
 #include <ipv6_defs.h>          /* ipv6_traffic_class */
 #endif
@@ -685,6 +685,7 @@ ol_tx_completion_handler(ol_txrx_pdev_handle pdev,
 	union ol_tx_desc_list_elem_t *lcl_freelist = NULL;
 	union ol_tx_desc_list_elem_t *tx_desc_last = NULL;
 	ol_tx_desc_list tx_descs;
+
 	TAILQ_INIT(&tx_descs);
 
 	ol_tx_delay_compute(pdev, status, desc_ids, num_msdus);

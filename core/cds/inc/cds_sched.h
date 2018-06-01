@@ -89,6 +89,8 @@
 
 typedef void (*cds_ol_rx_thread_cb)(void *context, void *rxpkt, uint16_t staid);
 
+typedef int (*send_mode_change_event_cb)(void);
+
 /*
 ** QDF Message queue definition.
 */
@@ -314,7 +316,7 @@ typedef struct _cds_context_type {
 		uint8_t *, uint8_t *);
 
 	/* Datapath callback functions */
-	void (*ol_txrx_update_mac_id_cb)(uint8_t , uint8_t);
+	void (*ol_txrx_update_mac_id_cb)(uint8_t, uint8_t);
 	void (*hdd_en_lro_in_cc_cb)(struct hdd_context_s *);
 	void (*hdd_disable_lro_in_cc_cb)(struct hdd_context_s *);
 	void (*hdd_set_rx_mode_rps_cb)(struct hdd_context_s *, void *, bool);
@@ -341,6 +343,7 @@ typedef struct _cds_context_type {
 	qdf_workqueue_t *cds_recovery_wq;
 	enum cds_hang_reason recovery_reason;
 	qdf_event_t channel_switch_complete;
+	send_mode_change_event_cb mode_change_cb;
 } cds_context_type, *p_cds_contextType;
 
 extern struct _cds_sched_context *gp_cds_sched_context;
@@ -376,6 +379,16 @@ void cds_drop_rxpkt_by_staid(p_cds_sched_context pSchedContext, uint16_t staId);
    -------------------------------------------------------------------------*/
 void cds_indicate_rxpkt(p_cds_sched_context pSchedContext,
 			struct cds_ol_rx_pkt *pkt);
+
+/**
+ * cds_wakeup_rx_thread() - wakeup rx thread
+ * @Arg: Pointer to the global CDS Sched Context
+ *
+ * This api wake up cds_ol_rx_thread() to process pkt
+ *
+ * Return: none
+ */
+void cds_wakeup_rx_thread(p_cds_sched_context pSchedContext);
 
 /*---------------------------------------------------------------------------
    \brief cds_alloc_ol_rx_pkt() - API to return next available cds message
@@ -437,6 +450,19 @@ void cds_drop_rxpkt_by_staid(p_cds_sched_context pSchedContext, uint16_t staId)
 static inline
 void cds_indicate_rxpkt(p_cds_sched_context pSchedContext,
 			struct cds_ol_rx_pkt *pkt)
+{
+}
+
+/**
+ * cds_wakeup_rx_thread() - wakeup rx thread
+ * @Arg: Pointer to the global CDS Sched Context
+ *
+ * This api wake up cds_ol_rx_thread() to process pkt
+ *
+ * Return: none
+ */
+static inline
+void cds_wakeup_rx_thread(p_cds_sched_context pSchedContext)
 {
 }
 
@@ -615,4 +641,16 @@ void cds_shutdown_notifier_purge(void);
  * shutdown.
  */
 void cds_shutdown_notifier_call(void);
+
+/**
+ * cds_remove_timer_from_sys_msg() - Flush timer message from sys msg queue
+ * @timer_cookie: Unique cookie of the timer message to be flushed
+ *
+ * Find the timer message in the sys msg queue for the unique cookie
+ * and flush the message from the queue.
+ *
+ * Return: None
+ */
+void cds_remove_timer_from_sys_msg(uint32_t timer_cookie);
+
 #endif /* #if !defined __CDS_SCHED_H */
