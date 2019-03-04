@@ -1,9 +1,6 @@
 /*
  * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
  *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
- *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 #if !defined(__CDS_SCHED_H)
@@ -51,6 +42,7 @@
 #include "qdf_mc_timer.h"
 #include "cds_config.h"
 #include "cds_reg_service.h"
+#include "qdf_cpuhp.h"
 
 #define TX_POST_EVENT               0x001
 #define TX_SUSPEND_EVENT            0x002
@@ -200,8 +192,8 @@ typedef struct _cds_sched_context {
 	/* Free message queue for OL Rx processing */
 	struct list_head cds_ol_rx_pkt_freeq;
 
-	/* cpu hotplug notifier */
-	struct notifier_block *cpu_hot_plug_notifier;
+	/* The CPU hotplug event registration handle, used to unregister */
+	struct qdf_cpuhp_handler *cpuhp_event_handle;
 
 	/* affinity lock */
 	struct mutex affinity_lock;
@@ -248,6 +240,7 @@ typedef struct _cds_msg_wrapper {
 
 /* forward-declare hdd_context_s as it is used ina function type */
 struct hdd_context_s;
+struct hdd_adapter_s;
 typedef struct _cds_context_type {
 	/* Messages buffers */
 	cds_msg_t aMsgBuffers[CDS_CORE_MAX_MESSAGES];
@@ -308,7 +301,8 @@ typedef struct _cds_context_type {
 	qdf_mutex_t qdf_conc_list_lock;
 	qdf_mc_timer_t dbs_opportunistic_timer;
 #ifdef FEATURE_WLAN_MCC_TO_SCC_SWITCH
-	void (*sap_restart_chan_switch_cb)(void *, uint32_t, uint32_t);
+	void (*sap_restart_chan_switch_cb)(struct hdd_adapter_s *,
+					   uint32_t, uint32_t);
 #endif
 	QDF_STATUS (*sme_get_valid_channels)(void*, uint16_t cfg_id,
 		uint8_t *, uint32_t *);
@@ -390,6 +384,16 @@ void cds_indicate_rxpkt(p_cds_sched_context pSchedContext,
  */
 void cds_wakeup_rx_thread(p_cds_sched_context pSchedContext);
 
+/**
+ * cds_close_rx_thread() - close the Tlshim Rx thread
+ * @p_cds_context: Pointer to the global CDS Context
+ *
+ * This api closes the Tlshim Rx thread:
+ *
+ * Return: qdf status
+ */
+QDF_STATUS cds_close_rx_thread(void *p_cds_context);
+
 /*---------------------------------------------------------------------------
    \brief cds_alloc_ol_rx_pkt() - API to return next available cds message
    The \a cds_alloc_ol_rx_pkt() returns next available cds message buffer
@@ -464,6 +468,20 @@ void cds_indicate_rxpkt(p_cds_sched_context pSchedContext,
 static inline
 void cds_wakeup_rx_thread(p_cds_sched_context pSchedContext)
 {
+}
+
+/**
+ * cds_close_rx_thread() - close the Tlshim Rx thread
+ * @p_cds_context: Pointer to the global CDS Context
+ *
+ * This api closes the Tlshim Rx thread:
+ *
+ * Return: qdf status
+ */
+static inline
+QDF_STATUS cds_close_rx_thread(void *p_cds_context)
+{
+	return QDF_STATUS_SUCCESS;
 }
 
 /**

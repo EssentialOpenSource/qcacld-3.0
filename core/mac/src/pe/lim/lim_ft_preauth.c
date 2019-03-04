@@ -1,8 +1,6 @@
 /*
  * Copyright (c) 2017-2018 The Linux Foundation. All rights reserved.
  *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all
@@ -294,10 +292,10 @@ void lim_perform_ft_pre_auth(tpAniSirGlobal pMac, QDF_STATUS status,
 	lim_diag_event_report(pMac, WLAN_PE_DIAG_ROAM_AUTH_START_EVENT,
 			pMac->lim.pSessionEntry, eSIR_SUCCESS, eSIR_SUCCESS);
 #endif
-
-	lim_send_auth_mgmt_frame(pMac, &authFrame,
-		 psessionEntry->ftPEContext.pFTPreAuthReq->preAuthbssId,
-		 LIM_NO_WEP_IN_FC, psessionEntry);
+	if (psessionEntry->ftPEContext.pFTPreAuthReq)
+		lim_send_auth_mgmt_frame(pMac, &authFrame,
+			 psessionEntry->ftPEContext.pFTPreAuthReq->preAuthbssId,
+			 LIM_NO_WEP_IN_FC, psessionEntry);
 
 	return;
 

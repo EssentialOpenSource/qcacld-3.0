@@ -1,9 +1,6 @@
 /*
  * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
  *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
- *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 /*
@@ -220,6 +211,18 @@ typedef enum {
 
 #endif
 
+/* RSN capabilities structure */
+
+struct rsn_caps {
+	uint16_t PreAuthSupported:1;
+	uint16_t NoPairwise:1;
+	uint16_t PTKSAReplayCounter:2;
+	uint16_t GTKSAReplayCounter:2;
+	uint16_t MFPRequired:1;
+	uint16_t MFPCapable:1;
+	uint16_t Reserved:8;
+};
+
 /**
  * enum sir_roam_op_code - Operation to be done by the callback.
  * @SIR_ROAM_SYNCH_PROPAGATION: Propagate the new BSS info after roaming.
@@ -346,6 +349,7 @@ typedef enum eSirResultCodes {
 	eSIR_SME_DEAUTH_STATUS,
 	eSIR_PNO_SCAN_SUCCESS,
 	eSIR_SME_INVALID_SESSION,
+	eSIR_SME_PEER_CREATE_FAILED,
 	eSIR_DONOT_USE_RESULT_CODE = SIR_MAX_ENUM_SIZE
 } tSirResultCodes;
 
@@ -514,6 +518,7 @@ typedef struct sSirSmeReadyReq {
 	void *csr_roam_synch_cb;
 	void *pe_roam_synch_cb;
 	void *sme_msg_cb;
+	void *stop_roaming_cb;
 } tSirSmeReadyReq, *tpSirSmeReadyReq;
 
 /**
@@ -570,16 +575,35 @@ struct sir_set_dual_mac_cfg {
 };
 
 /**
+ * enum set_antenna_mode_status - Status of set antenna mode
+ * command
+ * @SET_ANTENNA_MODE_STATUS_OK: command successful
+ * @SET_ANTENNA_MODE_STATUS_EINVAL: invalid antenna mode
+ * @SET_ANTENNA_MODE_STATUS_ECANCELED: mode change cancelled
+ * @SET_ANTENNA_MODE_STATUS_ENOTSUP: mode not supported
+ */
+enum set_antenna_mode_status {
+	SET_ANTENNA_MODE_STATUS_OK,
+	SET_ANTENNA_MODE_STATUS_EINVAL,
+	SET_ANTENNA_MODE_STATUS_ECANCELED,
+	SET_ANTENNA_MODE_STATUS_ENOTSUP,
+};
+
+typedef void (*antenna_mode_cb)(enum set_antenna_mode_status status,
+				void *context);
+
+/**
  * struct sir_antenna_mode_param - antenna mode param
  * @num_tx_chains: Number of TX chains
  * @num_rx_chains: Number of RX chains
- * @reason: Reason for setting antenna mode
  * @set_antenna_mode_resp: callback to set antenna mode command
+ * @set_antenna_mode_ctx: callback context to set antenna mode command
  */
 struct sir_antenna_mode_param {
 	uint32_t num_tx_chains;
 	uint32_t num_rx_chains;
-	void *set_antenna_mode_resp;
+	antenna_mode_cb set_antenna_mode_resp;
+	void *set_antenna_mode_ctx;
 };
 
 /**
@@ -783,7 +807,6 @@ typedef struct sSirSmeStartBssReq {
 	uint8_t sap_dot11mc;
 	uint16_t beacon_tx_rate;
 	bool vendor_vht_sap;
-
 } tSirSmeStartBssReq, *tpSirSmeStartBssReq;
 
 #define GET_IE_LEN_IN_BSS(lenInBss) (lenInBss + sizeof(lenInBss) - \
@@ -938,6 +961,7 @@ typedef struct sSirSmeScanReq {
 	uint8_t dot11mode;
 	tSirScanType scanType;
 	uint32_t scan_id;
+	uint32_t scan_requestor_id;
 	/**
 	 * minChannelTime. Not used if scanType is passive.
 	 * 0x0 - Dont Use min channel timer. Only max channel timeout will used.
@@ -1330,10 +1354,15 @@ typedef struct sSirSmeJoinReq {
 #ifdef WLAN_FEATURE_FILS_SK
 	struct cds_fils_connection_info fils_con_info;
 #endif
+	bool sae_pmk_cached;
 	bool ignore_assoc_disallowed;
 	bool enable_bcast_probe_rsp;
 	bool force_24ghz_in_ht20;
 	bool force_rsne_override;
+	bool supported_nss_1x1;
+	uint8_t vdev_nss;
+	uint8_t nss;
+	bool nss_forced_1x1;
 	tSirBssDescription bssDescription;
 	/*
 	 * WARNING: Pls make bssDescription as last variable in struct
@@ -1487,6 +1516,7 @@ typedef struct sSirSmeAssocInd {
 
 	tDot11fIEHTCaps HTCaps;
 	tDot11fIEVHTCaps VHTCaps;
+	tSirMacCapabilityInfo capability_info;
 } tSirSmeAssocInd, *tpSirSmeAssocInd;
 
 /* / Definition for Association confirm */
@@ -1747,6 +1777,7 @@ typedef struct sSirSmeDisassocInd {
 typedef struct sSirSmeDisassocCnf {
 	uint16_t messageType;   /* eWNI_SME_DISASSOC_CNF */
 	uint16_t length;
+	uint8_t sme_session_id;
 	tSirResultCodes statusCode;
 	struct qdf_mac_addr bssid;
 	struct qdf_mac_addr peer_macaddr;
@@ -1835,16 +1866,6 @@ typedef struct sSirSmeSwitchChannelInd {
 	struct ch_params_s chan_params;
 	struct qdf_mac_addr bssid;      /* BSSID */
 } tSirSmeSwitchChannelInd, *tpSirSmeSwitchChannelInd;
-
-/* / Definition for Neighbor BSS indication */
-/* / MAC ---> */
-/* / MAC reports this each time a new I/BSS is detected */
-typedef struct sSirSmeNeighborBssInd {
-	uint16_t messageType;   /* eWNI_SME_NEIGHBOR_BSS_IND */
-	uint16_t length;
-	uint8_t sessionId;
-	tSirBssDescription bssDescription[1];
-} tSirSmeNeighborBssInd, *tpSirSmeNeighborBssInd;
 
 /* / Definition for MIC failure indication */
 /* / MAC ---> */
@@ -2880,12 +2901,8 @@ typedef struct sSirUpdateAPWPARSNIEsReq {
 #define SIR_ROAM_SCAN_MAX_PB_REQ_SIZE    450
 /* Occupied channel list remains static */
 #define CHANNEL_LIST_STATIC                   1
-/* Occupied channel list can be learnt after init */
-#define CHANNEL_LIST_DYNAMIC_INIT             2
-/* Occupied channel list can be learnt after flush */
-#define CHANNEL_LIST_DYNAMIC_FLUSH            3
-/* Occupied channel list can be learnt after update */
-#define CHANNEL_LIST_DYNAMIC_UPDATE           4
+/* Occupied channel list can be dynamic */
+#define CHANNEL_LIST_DYNAMIC                  2
 #define SIR_ROAM_SCAN_24G_DEFAULT_CH     1
 #define SIR_ROAM_SCAN_5G_DEFAULT_CH      36
 #define SIR_ROAM_SCAN_RESERVED_BYTES     61
@@ -2902,6 +2919,24 @@ typedef struct sSirUpdateAPWPARSNIEsReq {
 #define SIR_OFFLOAD_ENABLE                          1
 
 #ifdef WLAN_NS_OFFLOAD
+/**
+ * enum sir_ipv6_addr_scope - Internal identification of IPv6 addr scope
+ * @SIR_IPV6_ADDR_SCOPE_INVALID: invalid scope
+ * @SIR_IPV6_ADDR_SCOPE_NODELOCAL: node local scope
+ * @SIR_IPV6_ADDR_SCOPE_LINKLOCAL: link local scope
+ * @SIR_IPV6_ADDR_SCOPE_SITELOCAL: site local scope
+ * @SIR_IPV6_ADDR_SCOPE_ORGLOCAL: org local scope
+ * @SIR_IPV6_ADDR_SCOPE_GLOBAL: global scope
+ */
+enum sir_ipv6_addr_scope {
+	SIR_IPV6_ADDR_SCOPE_INVALID = 0,
+	SIR_IPV6_ADDR_SCOPE_NODELOCAL = 1,
+	SIR_IPV6_ADDR_SCOPE_LINKLOCAL = 2,
+	SIR_IPV6_ADDR_SCOPE_SITELOCAL = 3,
+	SIR_IPV6_ADDR_SCOPE_ORGLOCAL = 4,
+	SIR_IPV6_ADDR_SCOPE_GLOBAL = 5
+};
+
 typedef struct sSirNsOffloadReq {
 	uint8_t srcIPv6Addr[SIR_MAC_IPV6_ADDR_LEN];
 	uint8_t selfIPv6Addr[SIR_MAC_NUM_TARGET_IPV6_NS_OFFLOAD_NA][SIR_MAC_IPV6_ADDR_LEN];
@@ -2911,7 +2946,35 @@ typedef struct sSirNsOffloadReq {
 	uint8_t targetIPv6AddrValid[SIR_MAC_NUM_TARGET_IPV6_NS_OFFLOAD_NA];
 	uint8_t target_ipv6_addr_ac_type[SIR_MAC_NUM_TARGET_IPV6_NS_OFFLOAD_NA];
 	uint8_t slotIdx;
+	enum sir_ipv6_addr_scope scope[SIR_MAC_NUM_TARGET_IPV6_NS_OFFLOAD_NA];
 } tSirNsOffloadReq, *tpSirNsOffloadReq;
+
+/**
+ * sir_get_ipv6_addr_scope() - Convert linux specific IPv6 addr scope to
+ *                             WLAN driver specific value
+ * @scope: linux specific IPv6 addr scope
+ *
+ * Return: WLAN driver sepcific IPv6 addr scope
+ */
+static inline
+enum sir_ipv6_addr_scope
+sir_get_ipv6_addr_scope(uint32_t ipv6_scope)
+{
+	switch (ipv6_scope) {
+	case IPV6_ADDR_SCOPE_NODELOCAL:
+		return SIR_IPV6_ADDR_SCOPE_NODELOCAL;
+	case IPV6_ADDR_SCOPE_LINKLOCAL:
+		return SIR_IPV6_ADDR_SCOPE_LINKLOCAL;
+	case IPV6_ADDR_SCOPE_SITELOCAL:
+		return SIR_IPV6_ADDR_SCOPE_SITELOCAL;
+	case IPV6_ADDR_SCOPE_ORGLOCAL:
+		return SIR_IPV6_ADDR_SCOPE_ORGLOCAL;
+	case IPV6_ADDR_SCOPE_GLOBAL:
+		return SIR_IPV6_ADDR_SCOPE_GLOBAL;
+	default:
+		return SIR_IPV6_ADDR_SCOPE_INVALID;
+	}
+}
 #endif /* WLAN_NS_OFFLOAD */
 
 typedef struct sSirHostOffloadReq {
@@ -3607,6 +3670,7 @@ typedef struct sSirRoamOffloadScanReq {
 	uint8_t ValidChannelCount;
 	uint8_t ValidChannelList[SIR_ROAM_MAX_CHANNELS];
 	bool IsESEAssoc;
+	bool is_11r_assoc;
 	uint8_t nProbes;
 	uint16_t HomeAwayTime;
 	tSirRoamNetworkType ConnectedNetwork;
@@ -3649,7 +3713,14 @@ typedef struct sSirRoamOffloadScanReq {
 	struct roam_fils_params roam_fils_params;
 #endif
 	struct scoring_param score_params;
+	struct rsn_caps rsn_caps;
 	struct wmi_11k_offload_params offload_11k_params;
+	uint32_t ho_delay_for_rx;
+	uint32_t roam_preauth_retry_count;
+	uint32_t roam_preauth_no_ack_timeout;
+	uint32_t min_delay_btw_roam_scans;
+	uint32_t roam_trigger_reason_bitmask;
+	bool roam_force_rssi_trigger;
 } tSirRoamOffloadScanReq, *tpSirRoamOffloadScanReq;
 
 typedef struct sSirRoamOffloadScanRsp {
@@ -3783,6 +3854,7 @@ typedef struct {
 	uint32_t kek_len;
 	uint64_t ullKeyReplayCounter;   /* replay counter */
 	struct qdf_mac_addr bssid;
+	bool is_fils_connection;
 } tSirGtkOffloadParams, *tpSirGtkOffloadParams;
 
 /*---------------------------------------------------------------------------
@@ -3951,21 +4023,6 @@ struct sir_hw_mode_trans_ind {
  */
 struct sir_dual_mac_config_resp {
 	uint32_t status;
-};
-
-/**
- * enum set_antenna_mode_status - Status of set antenna mode
- * command
- * @SET_ANTENNA_MODE_STATUS_OK: command successful
- * @SET_ANTENNA_MODE_STATUS_EINVAL: invalid antenna mode
- * @SET_ANTENNA_MODE_STATUS_ECANCELED: mode change cancelled
- * @SET_ANTENNA_MODE_STATUS_ENOTSUP: mode not supported
- */
-enum set_antenna_mode_status {
-	SET_ANTENNA_MODE_STATUS_OK,
-	SET_ANTENNA_MODE_STATUS_EINVAL,
-	SET_ANTENNA_MODE_STATUS_ECANCELED,
-	SET_ANTENNA_MODE_STATUS_ENOTSUP,
 };
 
 /**
@@ -4224,6 +4281,7 @@ typedef struct sAniHandoffReq {
 #define USER_SCAN_REQUESTOR_ID  0xA000
 #define ROC_SCAN_REQUESTOR_ID   0xB000
 #define PREAUTH_REQUESTOR_ID    0xC000
+#define ACS_SCAN_REQUESTOR_ID   0xD000
 
 typedef struct sSirScanOffloadReq {
 	uint8_t sessionId;
@@ -4457,6 +4515,11 @@ struct sir_peer_info_req {
  * @rssi: rssi
  * @tx_rate: last tx rate
  * @rx_rate: last rx rate
+ * @rx_mc_bc_cnt: Multicast broadcast packet count received from
+ *              current station
+ * MSB of rx_mc_bc_cnt indicates whether FW supports rx_mc_bc_cnt
+ * feature or not, if first bit is 1 it indictes that FW supports this
+ * feature, if it is 0 it indicates FW doesn't support this feature
  *
  * a station's information
  */
@@ -4465,6 +4528,7 @@ struct sir_peer_info {
 	int8_t rssi;
 	uint32_t tx_rate;
 	uint32_t rx_rate;
+	uint32_t rx_mc_bc_cnt;
 };
 
 /**
@@ -4547,6 +4611,17 @@ struct sir_peer_info_ext_resp {
 struct sir_peer_sta_info {
 	uint8_t sta_num;
 	struct sir_peer_info info[MAX_PEER_STA];
+};
+
+/**
+ * @sta_num: number of peer station which has valid info
+ * @info: peer extended information
+ *
+ * all SAP peer station's extended information retrieved
+ */
+struct sir_peer_sta_ext_info {
+	uint8_t sta_num;
+	struct sir_peer_info_ext info[MAX_PEER_STA];
 };
 
 typedef struct sSirAddPeriodicTxPtrn {
@@ -6716,7 +6791,6 @@ typedef void (*hw_mode_transition_cb)(uint32_t old_hw_mode_index,
 		uint32_t new_hw_mode_index,
 		uint32_t num_vdev_mac_entries,
 		struct sir_vdev_mac_map *vdev_mac_map);
-typedef void (*antenna_mode_cb)(uint32_t status);
 
 /**
  * struct sir_nss_update_request
@@ -6733,14 +6807,34 @@ struct sir_nss_update_request {
 };
 
 /**
- * struct sir_beacon_tx_complete_rsp
- *
- * @session_id: session for which beacon update happened
- * @tx_status: status of the beacon tx from FW
+ * enum sir_bcn_update_reason: bcn update reason
+ * @REASON_DEFAULT: reason default
+ * @REASON_NSS_UPDATE: If NSS is updated
+ * @REASON_CONFIG_UPDATE: Config update
+ * @REASON_SET_HT2040: HT2040 update
+ * @REASON_COLOR_CHANGE: Color change
+ * @REASON_CHANNEL_SWITCH: channel switch
  */
-struct sir_beacon_tx_complete_rsp {
-	uint8_t session_id;
-	uint8_t tx_status;
+enum sir_bcn_update_reason {
+	REASON_DEFAULT = 0,
+	REASON_NSS_UPDATE = 1,
+	REASON_CONFIG_UPDATE = 2,
+	REASON_SET_HT2040 = 3,
+	REASON_COLOR_CHANGE = 4,
+	REASON_CHANNEL_SWITCH = 5,
+};
+
+/**
+ * struct sir_bcn_update_rsp
+ *
+ * @vdev_id: session for which bcn was updated
+ * @reason: bcn update reason
+ * @status: status of the beacon sent to FW
+ */
+struct sir_bcn_update_rsp {
+	uint8_t vdev_id;
+	enum sir_bcn_update_reason reason;
+	QDF_STATUS status;
 };
 
 typedef void (*nss_update_cb)(void *context, uint8_t tx_status, uint8_t vdev_id,
@@ -7314,6 +7408,14 @@ struct sir_wake_lock_stats {
  * @pno_match: pno match wakeup count
  * @oem_response: oem response wakeup count
  * @pwr_save_fail_detected: pwr save fail detected wakeup count
+ * @mgmt_assoc: association request management frame
+ * @mgmt_disassoc: disassociation management frame
+ * @mgmt_assoc_resp: association response management frame
+ * @mgmt_reassoc: reassociate request management frame
+ * @mgmt_reassoc_resp: reassociate response management frame
+ * @mgmt_auth: authentication managament frame
+ * @mgmt_deauth: deauthentication management frame
+ * @mgmt_action: action managament frame
  */
 struct sir_vdev_wow_stats {
 	uint32_t ucast;
@@ -7332,6 +7434,14 @@ struct sir_vdev_wow_stats {
 	uint32_t pno_match;
 	uint32_t oem_response;
 	uint32_t pwr_save_fail_detected;
+	uint32_t mgmt_assoc;
+	uint32_t mgmt_disassoc;
+	uint32_t mgmt_assoc_resp;
+	uint32_t mgmt_reassoc;
+	uint32_t mgmt_reassoc_resp;
+	uint32_t mgmt_auth;
+	uint32_t mgmt_deauth;
+	uint32_t mgmt_action;
 };
 
 /**
@@ -7875,12 +7985,36 @@ struct sme_ndp_peer_ind {
  * struct sir_set_tx_rx_aggregation_size - sets tx rx aggregation size
  * @vdev_id: vdev id of the session
  * @tx_aggregation_size: Tx aggregation size
+ * @tx_aggregation_size_be: Tx aggregation size for be queue
+ * @tx_aggregation_size_bk: Tx aggregation size for bk queue
+ * @tx_aggregation_size_vi: Tx aggregation size for vi queue
+ * @tx_aggregation_size_vo: Tx aggregation size for vo queue
  * @rx_aggregation_size: Rx aggregation size
  */
 struct sir_set_tx_rx_aggregation_size {
 	uint8_t vdev_id;
 	uint32_t tx_aggregation_size;
+	uint32_t tx_aggregation_size_be;
+	uint32_t tx_aggregation_size_bk;
+	uint32_t tx_aggregation_size_vi;
+	uint32_t tx_aggregation_size_vo;
 	uint32_t rx_aggregation_size;
+};
+
+/**
+ * struct sir_set_tx_aggr_sw_retry_threshold - set sw retry threshold
+ * @vdev_id: vdev id of the session
+ * @tx_aggr_sw_retry_threshold_be: sw retry threshold for BE
+ * @tx_aggr_sw_retry_threshold_bk: sw retry threshold for BK
+ * @tx_aggr_sw_retry_threshold_vi: sw retry threshold for VI
+ * @tx_aggr_sw_retry_threshold_vo: sw retry threshold for VO
+ */
+struct sir_set_tx_aggr_sw_retry_threshold {
+	uint8_t vdev_id;
+	uint32_t tx_aggr_sw_retry_threshold_be;
+	uint32_t tx_aggr_sw_retry_threshold_bk;
+	uint32_t tx_aggr_sw_retry_threshold_vi;
+	uint32_t tx_aggr_sw_retry_threshold_vo;
 };
 
 /**
@@ -8188,11 +8322,15 @@ struct action_frame_random_filter {
 
 /**
  * struct chain_rssi_result - chain rssi result
+ * num_chains_valid: chains vaild number
  * @chain_rssi: chain rssi result
+ * @ant_id: antenna id
  */
 struct chain_rssi_result {
-	#define CHAIN_RSSI_NUM  8
-	uint32_t chain_rssi[CHAIN_RSSI_NUM];
+	#define CHAIN_MAX_NUM  8
+	uint32_t num_chains_valid;
+	uint32_t chain_rssi[CHAIN_MAX_NUM];
+	uint32_t ant_id[CHAIN_MAX_NUM];
 };
 
 /**
@@ -8372,4 +8510,60 @@ struct sir_limit_off_chan {
 	uint32_t rest_time;
 	bool skip_dfs_chans;
 };
+
+typedef void (*roam_scan_stats_cb)(void *context,
+				   struct wmi_roam_scan_stats_res *res);
+
+/**
+ * struct sir_roam_scan_stats - Stores roam scan context
+ * @vdev_id: vdev id
+ * @cb: callback to be invoked for roam scan stats response
+ * @context: context of callback
+ */
+struct sir_roam_scan_stats {
+	uint32_t vdev_id;
+	roam_scan_stats_cb cb;
+	void *context;
+};
+
+/**
+ * struct sae_info - SAE info used for commit/confirm messages
+ * @msg_type: Message type
+ * @msg_len: length of message
+ * @vdev_id: vdev id
+ * @peer_mac_addr: peer MAC address
+ * @ssid: SSID
+ */
+struct sir_sae_info {
+	uint16_t msg_type;
+	uint16_t msg_len;
+	uint32_t vdev_id;
+	struct qdf_mac_addr peer_mac_addr;
+	tSirMacSSid ssid;
+};
+
+/**
+ * struct sir_sae_msg - SAE msg used for message posting
+ * @message_type: message type
+ * @length: message length
+ * @session_id: SME session id
+ * @sae_status: SAE status, 0: Success, Non-zero: Failure.
+ */
+struct sir_sae_msg {
+	uint16_t message_type;
+	uint16_t length;
+	uint16_t session_id;
+	uint8_t sae_status;
+};
+
+/**
+ * struct set_pcl_req - Request message to set the PCL
+ * @chan_weights: PCL channel weights
+ * @band: Supported band
+ */
+struct set_pcl_req {
+	struct wmi_pcl_chan_weights chan_weights;
+	tSirRFBand band;
+};
+
 #endif /* __SIR_API_H */

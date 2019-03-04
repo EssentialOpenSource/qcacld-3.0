@@ -59,12 +59,24 @@ ifeq ($(KERNEL_BUILD), 0)
 	CONFIG_MOBILE_ROUTER := y
 	endif
 
+	ifeq ($(CONFIG_ARCH_SDXPOORWILLS), y)
+	CONFIG_MOBILE_ROUTER := y
+	endif
+
 	# If platform wants to support two driver base on this source
 	# code, below feature WLAN_DISABLE_EXPORT_SYMBOL needs to be
 	# enabled, otherwise when loading the second the driver,
 	# it will hit error of duplicate symbol.
 	ifeq ($(CONFIG_ARCH_SDX20), y)
 	CONFIG_WLAN_DISABLE_EXPORT_SYMBOL := y
+	endif
+
+	ifeq ($(CONFIG_ARCH_SDXPOORWILLS), y)
+	CONFIG_WLAN_DISABLE_EXPORT_SYMBOL := y
+	endif
+
+	ifeq ($(CONFIG_ARCH_SDXPOORWILLS), y)
+	CONFIG_FEATURE_SG := y
 	endif
 
 	ifeq ($(CONFIG_ARCH_MSM8917), y)
@@ -184,6 +196,15 @@ ifneq ($(CONFIG_ROME_IF),sdio)
 	#Flag to enable DISA
 	CONFIG_WLAN_FEATURE_DISA := y
 
+	#Flag to enable OWE
+	CONFIG_WLAN_FEATURE_OWE := y
+
+	#Flag to enable GMAC
+	CONFIG_WLAN_FEATURE_GMAC := y
+
+	#Flag to enable SAE
+	CONFIG_WLAN_FEATURE_SAE := y
+
 	#Flag to enable Fast Path feature
 	CONFIG_WLAN_FASTPATH := y
 
@@ -258,6 +279,13 @@ endif
 # If not set, assume, Common driver is with in the build tree
 WLAN_COMMON_ROOT ?= ../qca-wifi-host-cmn
 WLAN_COMMON_INC ?= $(WLAN_ROOT)/$(WLAN_COMMON_ROOT)
+
+ifeq ($(KERNEL_BUILD), 0)
+ifneq ($(ANDROID_BUILD_TOP),)
+	override WLAN_ROOT := $(ANDROID_BUILD_TOP)/$(WLAN_ROOT)
+	override WLAN_COMMON_INC := $(ANDROID_BUILD_TOP)/$(WLAN_COMMON_INC)
+endif
+endif
 
 ifneq ($(CONFIG_MOBILE_ROUTER), y)
 CONFIG_QCOM_ESE := y
@@ -335,6 +363,8 @@ endif
 ifneq ($(CONFIG_MOBILE_ROUTER), y)
 #Enable IBSS support on CLD
 CONFIG_QCA_IBSS_SUPPORT := 1
+
+CONFIG_WLAN_SYSFS := y
 endif
 
 #Enable power management suspend/resume functionality to PCI
@@ -449,16 +479,23 @@ HDD_OBJS := 	$(HDD_SRC_DIR)/wlan_hdd_assoc.o \
 		$(HDD_SRC_DIR)/wlan_hdd_request_manager.o \
 		$(HDD_SRC_DIR)/wlan_hdd_scan.o \
 		$(HDD_SRC_DIR)/wlan_hdd_softap_tx_rx.o \
-		$(HDD_SRC_DIR)/wlan_hdd_sysfs.o \
 		$(HDD_SRC_DIR)/wlan_hdd_tx_rx.o \
 		$(HDD_SRC_DIR)/wlan_hdd_trace.o \
 		$(HDD_SRC_DIR)/wlan_hdd_wext.o \
 		$(HDD_SRC_DIR)/wlan_hdd_wmm.o \
 		$(HDD_SRC_DIR)/wlan_hdd_wowl.o
 
+ifeq ($(CONFIG_WLAN_SYSFS), y)
+HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_sysfs.o
+endif
+
 ifeq ($(CONFIG_WLAN_DEBUGFS), y)
 HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_debugfs.o
 HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_debugfs_llstat.o
+HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_debugfs_csr.o
+HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_debugfs_connect.o
+HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_debugfs_offload.o
+HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_debugfs_roam.o
 endif
 
 ifeq ($(CONFIG_WLAN_FEATURE_DSRC), y)
@@ -784,30 +821,39 @@ SYS_OBJS :=	$(SYS_COMMON_SRC_DIR)/wlan_qct_sys.o \
 ############ Qca-wifi-host-cmn ############
 QDF_OS_DIR :=	qdf
 QDF_OS_INC_DIR := $(QDF_OS_DIR)/inc
-QDF_OS_SRC_DIR := $(QDF_OS_DIR)/linux/src
+QDF_OS_SRC_DIR := $(QDF_OS_DIR)/src
+QDF_OS_LINUX_SRC_DIR := $(QDF_OS_DIR)/linux/src
 QDF_OBJ_DIR := $(WLAN_COMMON_ROOT)/$(QDF_OS_SRC_DIR)
+QDF_LINUX_OBJ_DIR := $(WLAN_COMMON_ROOT)/$(QDF_OS_LINUX_SRC_DIR)
 
 QDF_INC :=	-I$(WLAN_COMMON_INC)/$(QDF_OS_INC_DIR) \
-		-I$(WLAN_COMMON_INC)/$(QDF_OS_SRC_DIR)
+		-I$(WLAN_COMMON_INC)/$(QDF_OS_LINUX_SRC_DIR)
 
-QDF_OBJS := 	$(QDF_OBJ_DIR)/qdf_defer.o \
-		$(QDF_OBJ_DIR)/qdf_event.o \
-		$(QDF_OBJ_DIR)/qdf_list.o \
-		$(QDF_OBJ_DIR)/qdf_lock.o \
-		$(QDF_OBJ_DIR)/qdf_mc_timer.o \
-		$(QDF_OBJ_DIR)/qdf_mem.o \
-		$(QDF_OBJ_DIR)/qdf_nbuf.o \
-		$(QDF_OBJ_DIR)/qdf_threads.o \
-		$(QDF_OBJ_DIR)/qdf_crypto.o \
-		$(QDF_OBJ_DIR)/qdf_trace.o
+QDF_OBJS := 	$(QDF_LINUX_OBJ_DIR)/qdf_defer.o \
+		$(QDF_LINUX_OBJ_DIR)/qdf_event.o \
+		$(QDF_LINUX_OBJ_DIR)/qdf_list.o \
+		$(QDF_LINUX_OBJ_DIR)/qdf_lock.o \
+		$(QDF_LINUX_OBJ_DIR)/qdf_mc_timer.o \
+		$(QDF_LINUX_OBJ_DIR)/qdf_mem.o \
+		$(QDF_LINUX_OBJ_DIR)/qdf_nbuf.o \
+		$(QDF_LINUX_OBJ_DIR)/qdf_threads.o \
+		$(QDF_LINUX_OBJ_DIR)/qdf_crypto.o \
+		$(QDF_LINUX_OBJ_DIR)/qdf_trace.o \
+		$(QDF_LINUX_OBJ_DIR)/qdf_idr.o
 
 ifeq ($(CONFIG_WLAN_DEBUGFS), y)
-QDF_OBJS += $(QDF_OBJ_DIR)/qdf_debugfs.o
+QDF_OBJS += $(QDF_LINUX_OBJ_DIR)/qdf_debugfs.o
 endif
 
 QDF_CLEAN_FILES := $(QDF_OBJ_DIR)/*.o \
 		   $(QDF_OBJ_DIR)/*.o.* \
 		   $(QDF_OBJ_DIR)/.*.o.*
+
+# enable CPU hotplug support if SMP is enabled
+ifeq ($(CONFIG_SMP),y)
+	QDF_OBJS += $(QDF_OBJ_DIR)/qdf_cpuhp.o
+	QDF_OBJS += $(QDF_LINUX_OBJ_DIR)/qdf_cpuhp.o
+endif
 
 ############ CDS (Connectivity driver services) ############
 CDS_DIR :=	core/cds
@@ -1131,6 +1177,7 @@ PLD_OBJS +=	$(PLD_SRC_DIR)/pld_usb.o
 endif
 
 TARGET_INC := -I$(WLAN_ROOT)/../fw-api/fw
+TARGET_IF_INC := -I$(WLAN_COMMON_INC)/target_if/core/inc
 
 LINUX_INC :=	-Iinclude
 
@@ -1161,7 +1208,8 @@ INCS +=		$(WMA_INC) \
 INCS +=		$(HIF_INC) \
 		$(BMI_INC)
 
-INCS +=		$(TARGET_INC)
+INCS +=		$(TARGET_INC) \
+		$(TARGET_IF_INC)
 
 INCS +=		$(NLINK_INC) \
 		$(PTT_INC) \
@@ -1253,7 +1301,8 @@ CDEFINES :=	-DANI_LITTLE_BYTE_ENDIAN \
 		-DCONFIG_160MHZ_SUPPORT \
 		-DCONFIG_MCL \
 		-DWMI_CMD_STRINGS \
-		-DCONFIG_HDD_INIT_WITH_RTNL_LOCK
+		-DCONFIG_HDD_INIT_WITH_RTNL_LOCK \
+		-DMWS_COEX
 
 ifneq ($(CONFIG_HIF_USB), 1)
 CDEFINES += -DWLAN_LOGGING_SOCK_SVC_ENABLE
@@ -1393,6 +1442,18 @@ ifeq ($(CONFIG_WLAN_POWER_DEBUGFS), y)
 CDEFINES += -DWLAN_POWER_DEBUGFS
 endif
 
+ifeq ($(CONFIG_WLAN_FEATURE_OWE),y)
+CDEFINES += -DWLAN_FEATURE_OWE
+endif
+
+ifeq ($(CONFIG_WLAN_FEATURE_GMAC),y)
+CDEFINES += -DWLAN_FEATURE_GMAC
+endif
+
+ifeq ($(CONFIG_WLAN_FEATURE_SAE),y)
+CDEFINES += -DWLAN_FEATURE_SAE
+endif
+
 ifeq ($(BUILD_DIAG_VERSION),1)
 CDEFINES += -DFEATURE_WLAN_DIAG_SUPPORT
 CDEFINES += -DFEATURE_WLAN_DIAG_SUPPORT_CSR
@@ -1447,6 +1508,10 @@ endif
 
 ifeq ($(CONFIG_QCA_IBSS_SUPPORT), 1)
 CDEFINES += -DQCA_IBSS_SUPPORT
+endif
+
+ifeq ($(CONFIG_WLAN_SYSFS), y)
+CDEFINES += -DWLAN_SYSFS
 endif
 
 #Enable OL debug and wmi unified functions
@@ -1789,6 +1854,10 @@ ifeq ($(CONFIG_WLAN_DISABLE_EXPORT_SYMBOL), y)
 CDEFINES += -DWLAN_DISABLE_EXPORT_SYMBOL
 endif
 
+ifeq ($(CONFIG_FEATURE_SG), y)
+CDEFINES += -DFEATURE_SG
+endif
+
 ifeq ($(CONFIG_MPC_UT_FRAMEWORK), y)
 CDEFINES += -DMPC_UT_FRAMEWORK
 endif
@@ -1825,6 +1894,10 @@ ifeq ($(CONFIG_WLAN_FEATURE_APF), y)
 CDEFINES += -DWLAN_FEATURE_APF
 endif
 
+ifeq ($(CONFIG_WLAN_FEATURE_SARV1_TO_SARV2), y)
+CDEFINES += -DWLAN_FEATURE_SARV1_TO_SARV2
+endif
+
 #Flag to enable/disable WLAN D0-WOW
 ifeq ($(CONFIG_PCI_MSM), y)
 ifeq ($(CONFIG_ROME_IF),pci)
@@ -1840,6 +1913,12 @@ endif
 #Flag to enable SMMU S1 support for SDM670
 ifeq ($(CONFIG_ARCH_SDM670), y)
 CDEFINES += -DENABLE_SMMU_S1_TRANSLATION
+endif
+
+ifeq ($(CONFIG_ARCH_SDXPOORWILLS), y)
+ifeq ($(CONFIG_ROME_IF),pci)
+CDEFINES += -DENABLE_SMMU_S1_TRANSLATION
+endif
 endif
 
 ifeq ($(CONFIG_DYNAMIC_DEBUG),y)

@@ -1,8 +1,5 @@
 /*
- * Copyright (c) 2014-2017 The Linux Foundation. All rights reserved.
- *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
+ * Copyright (c) 2014-2018 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 #include <linux/firmware.h>
@@ -376,18 +367,22 @@ __ol_transfer_bin_file(struct ol_context *ol_ctx, enum ATH_BIN_FILE file,
 			|| chip_id == AR6320_REV1_3_VERSION
 			|| chip_id == AR6320_REV2_1_VERSION)) {
 
+			bin_off = sizeof(SIGN_HEADER_T);
 			status = bmi_sign_stream_start(address,
 						(uint8_t *)fw_entry->data,
-						sizeof(SIGN_HEADER_T), ol_ctx);
+						bin_off, ol_ctx);
 			if (status != EOK) {
 				BMI_ERR("unable to start sign stream");
 				status = -EINVAL;
 				goto end;
 			}
 
-			bin_off = sizeof(SIGN_HEADER_T);
-			bin_len = sign_header->rampatch_len
-				  - sizeof(SIGN_HEADER_T);
+			bin_len = sign_header->rampatch_len - bin_off;
+			if (bin_len <= 0 || bin_len > fw_entry_size - bin_off) {
+				BMI_ERR("Invalid sign header");
+				status = -EINVAL;
+				goto end;
+			}
 		} else {
 			bin_sign = false;
 			bin_off = 0;
@@ -418,7 +413,7 @@ __ol_transfer_bin_file(struct ol_context *ol_ctx, enum ATH_BIN_FILE file,
 		bin_off += bin_len;
 		bin_len = sign_header->total_len - sign_header->rampatch_len;
 
-		if (bin_len > 0) {
+		if (bin_len > 0 && bin_len <= fw_entry_size - bin_off) {
 			status = bmi_sign_stream_start(0,
 					(uint8_t *)fw_entry->data +
 					bin_off, bin_len, ol_ctx);
@@ -1491,6 +1486,9 @@ static int ol_diag_read_reg_loc(struct hif_opaque_softc *scn, uint8_t *buffer,
 	const struct tgt_reg_section *curr_sec, *next_sec;
 	struct hif_target_info *tgt_info = hif_get_target_info_handle(scn);
 	uint32_t target_version =  tgt_info->target_version;
+
+	reg_table.section = NULL;
+	reg_table.section_size = 0;
 
 	section_len = ol_ath_get_reg_table(scn, target_version, &reg_table);
 

@@ -1,9 +1,6 @@
 /*
  * Copyright (c) 2011-2018 The Linux Foundation. All rights reserved.
  *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
- *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 /*
@@ -52,6 +43,7 @@
 #include "wlan_hdd_main.h"
 #include "pld_common.h"
 #include "csr_internal.h"
+#include "sch_api.h"
 
 #define MIN_CHN_TIME_TO_FIND_GO 100
 #define MAX_CHN_TIME_TO_FIND_GO 100
@@ -1663,12 +1655,13 @@ static void csr_scan_add_result(tpAniSirGlobal pMac, struct tag_csrscan_result
 				*pResult,
 				tDot11fBeaconIEs *pIes, uint32_t sessionId)
 {
-	tpCsrNeighborRoamControlInfo pNeighborRoamInfo =
-		&pMac->roam.neighborRoamInfo[sessionId];
-
+	tpCsrNeighborRoamControlInfo pNeighborRoamInfo = NULL;
 	struct qdf_mac_addr bssid;
 	uint8_t channel_id = pResult->Result.BssDescriptor.channelId;
+	bool is_session_valid = CSR_IS_SESSION_VALID(pMac, sessionId);
 
+	if (is_session_valid)
+		pNeighborRoamInfo = &pMac->roam.neighborRoamInfo[sessionId];
 	qdf_mem_zero(&bssid.bytes, QDF_MAC_ADDR_SIZE);
 	qdf_mem_copy(bssid.bytes, &pResult->Result.BssDescriptor.bssId,
 			QDF_MAC_ADDR_SIZE);
@@ -1679,7 +1672,8 @@ static void csr_scan_add_result(tpAniSirGlobal pMac, struct tag_csrscan_result
 				&pResult->Result.BssDescriptor, pIes);
 	csr_ll_insert_tail(&pMac->scan.scanResultList, &pResult->Link,
 			   LL_ACCESS_LOCK);
-	if (0 == pNeighborRoamInfo->cfgParams.channelInfo.numOfChannels) {
+	if (pNeighborRoamInfo &&
+	    0 == pNeighborRoamInfo->cfgParams.channelInfo.numOfChannels) {
 		/*
 		 * Build the occupied channel list, only if
 		 * "gNeighborScanChannelList" is NOT set in the cfg.ini file
@@ -2067,7 +2061,7 @@ static int32_t csr_calculate_congestion_score(tpAniSirGlobal mac_ctx,
 		bss_score_params->rssi_score.good_rssi_threshold * (-1);
 
 	/* For bad zone rssi get score from last index */
-	if (bss_info->rssi < good_rssi_threshold)
+	if (bss_info->rssi <= good_rssi_threshold)
 		return csr_get_score_for_index(
 				bss_score_params->esp_qbss_scoring.num_slot,
 				bss_score_params->weight_cfg.
@@ -2174,9 +2168,6 @@ static int32_t csr_calculate_nss_score(uint8_t sta_nss, uint8_t ap_nss,
 {
 	uint8_t nss;
 	uint8_t score_pct;
-
-	if (wma_is_current_hwmode_dbs())
-		sta_nss--;
 
 	nss = ap_nss;
 	if (sta_nss < nss)
@@ -2359,6 +2350,23 @@ static int32_t _csr_calculate_bss_score(tpAniSirGlobal mac_ctx,
 
 	return score;
 }
+static uint8_t csr_sta_get_supported_nss(tpAniSirGlobal mac_ctx,
+					   tSirBssDescription *bss_info)
+{
+	uint8_t supported_nss = 1;
+
+	if (wma_is_hw_dbs_capable() &&
+	    cds_is_dbs_req_for_channel(bss_info->channelId))
+		return supported_nss;
+
+	if (mac_ctx->vdev_type_nss_2g.sta &&
+	    CDS_IS_CHANNEL_24GHZ(bss_info->channelId))
+		supported_nss = mac_ctx->vdev_type_nss_2g.sta;
+	else if (mac_ctx->vdev_type_nss_5g.sta &&
+		 CDS_IS_CHANNEL_5GHZ(bss_info->channelId))
+		supported_nss = mac_ctx->vdev_type_nss_5g.sta;
+	return supported_nss;
+}
 /**
  * csr_calculate_bss_score() - Calculate candidate AP score for Best
  * candidate selection for connection
@@ -2380,13 +2388,16 @@ static void csr_calculate_bss_score(tpAniSirGlobal pMac,
 	tSirBssDescription *bss_info = &(pBss->Result.BssDescriptor);
 
 	channel_id = cds_get_channel_enum(pBss->Result.BssDescriptor.channelId);
-	if (pMac->roam.configParam.enable2x2)
-		nss = 2;
-
-	if (channel_id < NUM_CHANNELS)
+	if (channel_id < NUM_CHANNELS) {
+		nss = csr_sta_get_supported_nss(pMac, bss_info);
+		if (!nss) {
+			sme_err("scoring failed for BSSID:- "MAC_ADDRESS_STR"",
+				MAC_ADDR_ARRAY(bss_info->bssId));
+			return;
+		}
 		score = _csr_calculate_bss_score(pMac, bss_info,
-			pcl_chan_weight, nss);
-
+				pcl_chan_weight, nss);
+	}
 	pBss->bss_score = score;
 	return;
 }
@@ -2456,8 +2467,15 @@ csr_save_scan_entry(tpAniSirGlobal pMac,
 				pcl_chan_weight);
 		}
 	}
-	if (pFilter)
+	if (pFilter && pMac->roam.configParam.is_bssid_hint_priority &&
+	    !qdf_mem_cmp(pResult->Result.BssDescriptor.bssId,
+			 pFilter->bssid_hint.bytes, QDF_MAC_ADDR_SIZE)) {
+		sme_debug("BSSID hint AP "MAC_ADDRESS_STR " give max score",
+			  MAC_ADDR_ARRAY(pFilter->bssid_hint.bytes));
+		pResult->bss_score = BEST_CANDIDATE_MAX_BSS_SCORE;
+	} else if (pFilter) {
 		csr_calculate_bss_score(pMac, pResult, pcl_chan_weight);
+	}
 
 	/*
 	 * No need to lock pRetList because it is locally allocated and no
@@ -2469,17 +2487,7 @@ csr_save_scan_entry(tpAniSirGlobal pMac,
 		(*count)++;
 		return status;
 	}
-	if (pFilter &&
-	   !qdf_mem_cmp(pResult->Result.BssDescriptor.bssId,
-	   pFilter->bssid_hint.bytes, QDF_MAC_ADDR_SIZE) &&
-	   pMac->roam.configParam.is_bssid_hint_priority) {
-		/* bssid hint AP should be on head */
-		csr_ll_insert_head(&pRetList->List,
-			&pResult->Link, LL_ACCESS_NOLOCK);
-		(*count)++;
-		pResult->bss_score = BEST_CANDIDATE_MAX_BSS_SCORE;
-		return status;
-	}
+
 	pTmpEntry = csr_ll_peek_head(&pRetList->List, LL_ACCESS_NOLOCK);
 	while (pTmpEntry) {
 		pTmpResult = GET_BASE_ADDR(pTmpEntry, struct tag_csrscan_result,
@@ -3834,6 +3842,10 @@ static struct tag_csrscan_result *csr_scan_save_bss_description(tpAniSirGlobal
 	/* figure out how big the BSS description is (the BSSDesc->length does
 	 * NOT include the size of the length field itself).
 	 */
+	if (CSR_SCAN_IS_OVER_BSS_LIMIT(pMac)) {
+		sme_debug("BSS Limit reached");
+		return NULL;
+	}
 	cbBSSDesc = pBSSDescription->length + sizeof(pBSSDescription->length);
 
 	cbAllocated = sizeof(struct tag_csrscan_result) + cbBSSDesc;
@@ -3849,12 +3861,7 @@ static struct tag_csrscan_result *csr_scan_save_bss_description(tpAniSirGlobal
 				       bssId));
 		qdf_mem_copy(&pCsrBssDescription->Result.BssDescriptor,
 			     pBSSDescription, cbBSSDesc);
-#if defined(QDF_ENSBALED)
-		if (NULL != pCsrBssDescription->Result.pvIes) {
-			QDF_ASSERT(pCsrBssDescription->Result.pvIes == NULL);
-			return NULL;
-		}
-#endif
+
 		csr_scan_add_result(pMac, pCsrBssDescription, pIes, sessionId);
 	}
 
@@ -4079,6 +4086,7 @@ void csr_apply_channel_power_info_to_fw(tpAniSirGlobal mac_ctx,
 		sme_err("11D channel list is empty");
 	}
 	csr_set_cfg_country_code(mac_ctx, countryCode);
+	sch_edca_profile_update_all(mac_ctx);
 }
 
 #ifdef FEATURE_WLAN_DIAG_SUPPORT_CSR
@@ -4267,6 +4275,7 @@ QDF_STATUS csr_set_country_code(tpAniSirGlobal pMac, uint8_t *pCountry)
 				     pCountry,
 				     WNI_CFG_COUNTRY_CODE_LEN);
 			csr_set_cfg_country_code(pMac, pCountry);
+			sch_edca_profile_update_all(pMac);
 		}
 	}
 	return status;
@@ -6038,6 +6047,7 @@ static QDF_STATUS csr_send_mb_scan_req(tpAniSirGlobal pMac, uint16_t sessionId,
 	}
 	pMsg->p2pSearch = pScanReq->p2pSearch;
 	pMsg->scan_id = pScanReq->scan_id;
+	pMsg->scan_requestor_id = pScanReq->scan_requestor_id;
 
 	pMsg->enable_scan_randomization =
 					pScanReq->enable_scan_randomization;
@@ -6651,6 +6661,7 @@ QDF_STATUS csr_scan_copy_request(tpAniSirGlobal mac_ctx,
 	dst_req->skipDfsChnlInP2pSearch =
 		src_req->skipDfsChnlInP2pSearch;
 	dst_req->scan_id = src_req->scan_id;
+	dst_req->scan_requestor_id = src_req->scan_requestor_id;
 	dst_req->timestamp = src_req->timestamp;
 
 	status = csr_scan_copy_ie_whitelist_attrs(dst_req, src_req);
@@ -7860,6 +7871,13 @@ QDF_STATUS csr_scan_save_preferred_network_found(tpAniSirGlobal pMac,
 	    (SIR_MAC_HDR_LEN_3A + SIR_MAC_B_PR_SSID_OFFSET)) {
 		uLen = pPrefNetworkFoundInd->frameLength -
 		       (SIR_MAC_HDR_LEN_3A + SIR_MAC_B_PR_SSID_OFFSET);
+	}
+
+	if (uLen > (UINT_MAX - sizeof(struct tag_csrscan_result))) {
+		sme_err("Incorrect len: %d, may leads to int overflow, uLen %d",
+			pPrefNetworkFoundInd->frameLength, uLen);
+		qdf_mem_free(parsed_frm);
+		return QDF_STATUS_E_FAILURE;
 	}
 	pScanResult = qdf_mem_malloc(sizeof(struct tag_csrscan_result) + uLen);
 	if (NULL == pScanResult) {

@@ -1,9 +1,6 @@
 /*
  * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
  *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
- *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 #ifndef WLAN_QCT_WLANSAP_H
@@ -145,7 +136,6 @@ typedef enum {
 	 */
 	eSAP_STA_DISASSOC_EVENT,
 
-	eSAP_STA_LOSTLINK_DETECTED,
 	/* Event sent when user called wlansap_set_key_sta */
 	eSAP_STA_SET_KEY_EVENT,
 	/* Event sent whenever there is MIC failure detected */
@@ -237,6 +227,7 @@ typedef enum {
 typedef struct sap_StartBssCompleteEvent_s {
 	uint8_t status;
 	uint8_t operatingChannel;
+	enum phy_ch_width ch_width;
 	uint16_t staId;         /* self StaID */
 	uint8_t sessionId;      /* SoftAP SME session ID */
 } tSap_StartBssCompleteEvent;
@@ -295,6 +286,7 @@ typedef struct sap_StationAssocReassocCompleteEvent_s {
 	uint8_t tx_mcs_map;
 	tDot11fIEHTCaps ht_caps;
 	tDot11fIEVHTCaps vht_caps;
+	tSirMacCapabilityInfo capability_info;
 } tSap_StationAssocReassocCompleteEvent;
 
 typedef struct sap_StationDisassocCompleteEvent_s {
@@ -304,6 +296,10 @@ typedef struct sap_StationDisassocCompleteEvent_s {
 	uint32_t statusCode;
 	uint32_t reason_code;
 	eSapDisassocReason reason;
+	int rssi;
+	int tx_rate;
+	int rx_rate;
+	uint32_t rx_mc_bc_cnt;
 } tSap_StationDisassocCompleteEvent;
 
 typedef struct sap_StationSetKeyCompleteEvent_s {
@@ -519,6 +515,7 @@ struct sap_acs_cfg {
 	uint8_t    ht_sec_ch;
 	uint8_t    vht_seg0_center_ch;
 	uint8_t    vht_seg1_center_ch;
+	bool dfs_master_enable;
 };
 
 /*

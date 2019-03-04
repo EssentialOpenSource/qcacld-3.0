@@ -1,9 +1,6 @@
 /*
  * Copyright (c) 2013-2018 The Linux Foundation. All rights reserved.
  *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
- *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 #ifndef WMA_H
@@ -275,7 +266,7 @@ enum ds_mode {
 #define WMA_CHAN_START_RESP             0
 #define WMA_CHAN_END_RESP               1
 
-#define WMA_BCN_BUF_MAX_SIZE 2500
+#define WMA_BCN_BUF_MAX_SIZE 512
 #define WMA_NOA_IE_SIZE(num_desc) (2 + (13 * (num_desc)))
 #define WMA_MAX_NOA_DESCRIPTORS 4
 
@@ -357,8 +348,8 @@ enum ds_mode {
 #define WMA_RSSI_THOLD_DEFAULT   -300
 
 #ifdef FEATURE_WLAN_SCAN_PNO
-#define WMA_PNO_MATCH_WAKE_LOCK_TIMEOUT         WAKELOCK_DURATION_RECOMMENDED
-#define WMA_PNO_SCAN_COMPLETE_WAKE_LOCK_TIMEOUT WAKELOCK_DURATION_RECOMMENDED
+#define WMA_PNO_MATCH_WAKE_LOCK_TIMEOUT         2000
+#define WMA_PNO_SCAN_COMPLETE_WAKE_LOCK_TIMEOUT 2000
 #endif /* FEATURE_WLAN_SCAN_PNO */
 
 #define WMA_AUTH_REQ_RECV_WAKE_LOCK_TIMEOUT     WAKELOCK_DURATION_RECOMMENDED
@@ -430,7 +421,6 @@ enum ds_mode {
 
 #define WMA_DEFAULT_QPOWER_MAX_PSPOLL_BEFORE_WAKE 1
 #define WMA_DEFAULT_QPOWER_TX_WAKE_THRESHOLD 2
-#define WMA_DEFAULT_SIFS_BURST_DURATION      8160
 
 #define WMA_VHT_PPS_PAID_MATCH 1
 #define WMA_VHT_PPS_GID_MATCH 2
@@ -575,9 +565,6 @@ static const t_probeTime_dwellTime
 };
 
 typedef void (*txFailIndCallback)(uint8_t *peer_mac, uint8_t seqNo);
-typedef void (*encrypt_decrypt_cb)(struct sir_encrypt_decrypt_rsp_params
-		*encrypt_decrypt_rsp_params);
-
 
 typedef void (*tp_wma_packetdump_cb)(qdf_nbuf_t netbuf,
 			uint8_t status, uint8_t vdev_id, uint8_t type);
@@ -836,8 +823,6 @@ typedef struct {
  * @rxchainmask: rx chain mask
  * @txpow2g: tx power limit for 2GHz
  * @txpow5g: tx power limit for 5GHz
- * @burst_enable: is burst enable/disable
- * @burst_dur: burst duration
  *
  * This structure stores pdev parameters.
  * Some of these parameters are set in fw and some
@@ -855,8 +840,6 @@ typedef struct {
 	uint32_t rxchainmask;
 	uint32_t txpow2g;
 	uint32_t txpow5g;
-	uint32_t burst_enable;
-	uint32_t burst_dur;
 } pdev_cli_config_t;
 
 /**
@@ -970,16 +953,18 @@ typedef struct {
  * @key_length: key length
  * @key: key
  * @key_id: key id
+ * @key_cipher: key cipher
  */
 typedef struct {
 	uint16_t key_length;
-	uint8_t key[CSR_AES_KEY_LEN];
+	uint8_t key[CSR_AES_GMAC_256_KEY_LEN];
 
 	/* IPN is maintained per iGTK keyID
 	 * 0th index for iGTK keyID = 4;
 	 * 1st index for iGTK KeyID = 5
 	 */
 	wma_igtk_ipn_t key_id[2];
+	uint32_t key_cipher;
 } wma_igtk_key_t;
 #endif
 
@@ -1048,6 +1033,7 @@ struct roam_synch_frame_ind {
  * @aid: association id
  * @rmfEnabled: Robust Management Frame (RMF) enabled/disabled
  * @key: GTK key
+ * @ucast_key_cipher: unicast cipher key
  * @uapsd_cached_val: uapsd cached value
  * @stats_rsp: stats response
  * @fw_stats_set: fw stats value
@@ -1084,6 +1070,7 @@ struct roam_synch_frame_ind {
  * @vdev_stop_wakelock: wakelock to protect vdev stop op with firmware
  * @vdev_set_key_wakelock: wakelock to protect vdev set key op with firmware
  * @channel: channel
+ * @roam_scan_stats_req: cached roam scan stats request
  */
 struct wma_txrx_node {
 	uint8_t addr[IEEE80211_ADDR_LEN];
@@ -1123,6 +1110,7 @@ struct wma_txrx_node {
 	uint8_t rmfEnabled;
 #ifdef WLAN_FEATURE_11W
 	wma_igtk_key_t key;
+	uint32_t ucast_key_cipher;
 #endif /* WLAN_FEATURE_11W */
 	uint32_t uapsd_cached_val;
 	tAniGetPEStatsRsp *stats_rsp;
@@ -1175,6 +1163,7 @@ struct wma_txrx_node {
 	struct roam_synch_frame_ind roam_synch_frame_ind;
 	bool is_waiting_for_key;
 	uint8_t channel;
+	struct sir_roam_scan_stats *roam_scan_stats_req;
 };
 
 #if defined(QCA_WIFI_FTM)
@@ -1355,6 +1344,7 @@ struct hw_mode_idx_to_mac_cap_idx {
  * @each_phy_cap_per_hwmode: PHY's caps for each hw mode
  * @num_phy_for_hal_reg_cap: number of phy for hal reg cap
  * @hw_mode_to_mac_cap_map: map between hw_mode to capabilities
+ * @sar_capability: supported SAR versions
  */
 struct extended_caps {
 	WMI_SOC_MAC_PHY_HW_MODE_CAPS num_hw_modes;
@@ -1363,6 +1353,7 @@ struct extended_caps {
 	WMI_SOC_HAL_REG_CAPABILITIES num_phy_for_hal_reg_cap;
 	WMI_HAL_REG_CAPABILITIES_EXT *each_phy_hal_reg_cap;
 	struct hw_mode_idx_to_mac_cap_idx *hw_mode_to_mac_cap_map;
+	WMI_SAR_CAPABILITIES sar_capability;
 };
 
 /**
@@ -2221,6 +2212,7 @@ typedef struct wma_tdls_params {
 	uint32_t puapsd_rx_frame_threshold;
 	uint32_t teardown_notification_ms;
 	uint32_t tdls_peer_kickout_threshold;
+	uint32_t tdls_discovery_wake_timeout;
 } t_wma_tdls_params;
 
 /**
@@ -2391,7 +2383,7 @@ QDF_STATUS wma_set_rssi_monitoring(tp_wma_handle wma,
 					struct rssi_monitor_req *req);
 
 QDF_STATUS wma_send_pdev_set_pcl_cmd(tp_wma_handle wma_handle,
-		struct wmi_pcl_chan_weights *msg);
+		struct set_pcl_req *msg);
 
 QDF_STATUS wma_send_pdev_set_hw_mode_cmd(tp_wma_handle wma_handle,
 		struct sir_hw_mode *msg);
@@ -2475,10 +2467,11 @@ int wma_get_apf_caps_event_handler(void *handle,
 /**
  * wma_get_apf_capabilities - Send get apf capability to firmware
  * @wma_handle: wma handle
+ * @context: APF context
  *
  * Return: QDF_STATUS enumeration.
  */
-QDF_STATUS wma_get_apf_capabilities(tp_wma_handle wma);
+QDF_STATUS wma_get_apf_capabilities(tp_wma_handle wma, void *context);
 
 /**
  *  wma_set_apf_instructions - Set apf instructions to firmware

@@ -1,8 +1,5 @@
 /*
- * Copyright (c) 2011-2017 The Linux Foundation. All rights reserved.
- *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
+ * Copyright (c) 2011-2018 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 /**
@@ -767,7 +758,7 @@ int
 htt_h2t_dbg_stats_get(struct htt_pdev_t *pdev,
 		      uint32_t stats_type_upload_mask,
 		      uint32_t stats_type_reset_mask,
-		      uint8_t cfg_stat_type, uint32_t cfg_val, uint64_t cookie)
+		      uint8_t cfg_stat_type, uint32_t cfg_val, uint8_t cookie)
 {
 	struct htt_htc_pkt *pkt;
 	qdf_nbuf_t msg;
@@ -830,11 +821,11 @@ htt_h2t_dbg_stats_get(struct htt_pdev_t *pdev,
 
 	/* cookie LSBs */
 	msg_word++;
-	*msg_word = cookie & 0xffffffff;
+	*msg_word = cookie;
 
 	/* cookie MSBs */
 	msg_word++;
-	*msg_word = cookie >> 32;
+	*msg_word = 0;
 
 	SET_HTC_PACKET_INFO_TX(&pkt->htc_pkt,
 			       htt_h2t_send_complete_free_netbuf,

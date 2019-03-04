@@ -1,9 +1,6 @@
 /*
  * Copyright (c) 2011-2018 The Linux Foundation. All rights reserved.
  *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
- *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 /*=== includes ===*/
@@ -141,6 +132,7 @@ static void ol_txrx_peer_dec_ref_cnt(struct ol_txrx_peer_t *peer);
 void
 ol_txrx_copy_mac_addr_raw(ol_txrx_vdev_handle vdev, uint8_t *bss_addr)
 {
+	qdf_spin_lock_bh(&vdev->pdev->last_real_peer_mutex);
 	if (bss_addr && vdev->last_real_peer &&
 	    !qdf_mem_cmp((u8 *)bss_addr,
 			     vdev->last_real_peer->mac_addr.raw,
@@ -148,6 +140,7 @@ ol_txrx_copy_mac_addr_raw(ol_txrx_vdev_handle vdev, uint8_t *bss_addr)
 		qdf_mem_copy(vdev->hl_tdls_ap_mac_addr.raw,
 			     vdev->last_real_peer->mac_addr.raw,
 			     OL_TXRX_MAC_ADDR_LEN);
+	qdf_spin_unlock_bh(&vdev->pdev->last_real_peer_mutex);
 }
 
 /**
@@ -165,15 +158,14 @@ ol_txrx_add_last_real_peer(ol_txrx_pdev_handle pdev,
 {
 	ol_txrx_peer_handle peer;
 
-	if (vdev->last_real_peer == NULL) {
-		peer = NULL;
-		peer = ol_txrx_find_peer_by_addr(pdev,
-				vdev->hl_tdls_ap_mac_addr.raw,
-				peer_id);
-		if (peer && (peer->peer_ids[0] !=
-					HTT_INVALID_PEER_ID))
-			vdev->last_real_peer = peer;
-	}
+	peer = ol_txrx_find_peer_by_addr(pdev,
+					 vdev->hl_tdls_ap_mac_addr.raw,
+					 peer_id);
+	qdf_spin_lock_bh(&pdev->last_real_peer_mutex);
+	if (!vdev->last_real_peer && peer &&
+	    peer->peer_ids[0] != HTT_INVALID_PEER_ID)
+		vdev->last_real_peer = peer;
+	qdf_spin_unlock_bh(&pdev->last_real_peer_mutex);
 }
 
 /**
@@ -208,14 +200,18 @@ ol_txrx_update_last_real_peer(
 {
 	struct ol_txrx_vdev_t *vdev;
 
+	if (!restore_last_peer)
+		return;
+
 	vdev = peer->vdev;
-	if (restore_last_peer && (vdev->last_real_peer == NULL)) {
-		peer = NULL;
-		peer = ol_txrx_find_peer_by_addr(pdev,
-				vdev->hl_tdls_ap_mac_addr.raw, peer_id);
-		if (peer && (peer->peer_ids[0] != HTT_INVALID_PEER_ID))
-			vdev->last_real_peer = peer;
-	}
+	peer = ol_txrx_find_peer_by_addr(pdev,
+					 vdev->hl_tdls_ap_mac_addr.raw,
+					 peer_id);
+	qdf_spin_lock_bh(&pdev->last_real_peer_mutex);
+	if (!vdev->last_real_peer && peer &&
+	    (peer->peer_ids[0] != HTT_INVALID_PEER_ID))
+		vdev->last_real_peer = peer;
+	qdf_spin_unlock_bh(&pdev->last_real_peer_mutex);
 }
 #endif
 
@@ -1468,8 +1464,10 @@ ol_txrx_pdev_attach(ol_pdev_handle ctrl_pdev,
 
 	TXRX_STATS_INIT(pdev);
 	ol_txrx_tso_stats_init(pdev);
+	ol_txrx_fw_stats_desc_pool_init(pdev, FW_STATS_DESC_POOL_SIZE);
 
 	TAILQ_INIT(&pdev->vdev_list);
+	TAILQ_INIT(&pdev->roam_stale_peer_list);
 
 	TAILQ_INIT(&pdev->req_list);
 	pdev->req_list_depth = 0;
@@ -1532,6 +1530,7 @@ fail2:
 
 fail1:
 	ol_txrx_tso_stats_deinit(pdev);
+	ol_txrx_fw_stats_desc_pool_deinit(pdev);
 	qdf_mem_free(pdev);
 
 fail0:
@@ -1568,7 +1567,7 @@ void htt_pkt_log_init(struct ol_txrx_pdev_t *handle, void *scn)
  *
  * Return: void
  */
-static void htt_pktlogmod_exit(struct ol_txrx_pdev_t *handle, void *scn)
+void htt_pktlogmod_exit(struct ol_txrx_pdev_t *handle, void *scn)
 {
 	if (scn && cds_get_conparam() != QDF_GLOBAL_FTM_MODE &&
 		!QDF_IS_EPPING_ENABLED(cds_get_conparam()) &&
@@ -1579,7 +1578,7 @@ static void htt_pktlogmod_exit(struct ol_txrx_pdev_t *handle, void *scn)
 }
 #else
 void htt_pkt_log_init(ol_txrx_pdev_handle handle, void *ol_sc) { }
-static void htt_pktlogmod_exit(ol_txrx_pdev_handle handle, void *sc)  { }
+void htt_pktlogmod_exit(ol_txrx_pdev_handle handle, void *sc)  { }
 #endif
 
 /**
@@ -2271,7 +2270,7 @@ static void ol_txrx_debugfs_exit(ol_txrx_pdev_handle pdev)
  */
 void ol_txrx_pdev_detach(ol_txrx_pdev_handle pdev)
 {
-	struct ol_txrx_stats_req_internal *req;
+	struct ol_txrx_stats_req_internal *req, *temp_req;
 	int i = 0;
 
 	/*checking to ensure txrx pdev structure is not NULL */
@@ -2287,35 +2286,11 @@ void ol_txrx_pdev_detach(ol_txrx_pdev_handle pdev)
 			"Warning: the txrx req list is not empty, depth=%d\n",
 			pdev->req_list_depth
 			);
-	TAILQ_FOREACH(req, &pdev->req_list, req_list_elem) {
+	TAILQ_FOREACH_SAFE(req, &pdev->req_list, req_list_elem, temp_req) {
 		TAILQ_REMOVE(&pdev->req_list, req, req_list_elem);
 		pdev->req_list_depth--;
 		ol_txrx_err(
 			"%d: %pK,verbose(%d), concise(%d), up_m(0x%x), reset_m(0x%x)\n",
-			i++,
-			req,
-			req->base.print.verbose,
-			req->base.print.concise,
-			req->base.stats_type_upload_mask,
-			req->base.stats_type_reset_mask
-			);
-		qdf_mem_free(req);
-	}
-	qdf_spin_unlock_bh(&pdev->req_list_spinlock);
-
-	qdf_spinlock_destroy(&pdev->req_list_spinlock);
-
-	qdf_spin_lock_bh(&pdev->req_list_spinlock);
-	if (pdev->req_list_depth > 0)
-		ol_txrx_err(
-			"Warning: the txrx req list is not empty, depth=%d\n",
-			pdev->req_list_depth
-			);
-	TAILQ_FOREACH(req, &pdev->req_list, req_list_elem) {
-		TAILQ_REMOVE(&pdev->req_list, req, req_list_elem);
-		pdev->req_list_depth--;
-		ol_txrx_err(
-			"%d: %p,verbose(%d), concise(%d), up_m(0x%x), reset_m(0x%x)\n",
 			i++,
 			req,
 			req->base.print.verbose,
@@ -2339,6 +2314,7 @@ void ol_txrx_pdev_detach(ol_txrx_pdev_handle pdev)
 	htt_pdev_free(pdev->htt_pdev);
 	ol_txrx_peer_find_detach(pdev);
 	ol_txrx_tso_stats_deinit(pdev);
+	ol_txrx_fw_stats_desc_pool_deinit(pdev);
 
 	ol_txrx_pdev_txq_log_destroy(pdev);
 	ol_txrx_pdev_grp_stat_destroy(pdev);
@@ -2501,6 +2477,7 @@ void ol_txrx_vdev_register(ol_txrx_vdev_handle vdev,
 	vdev->osif_dev = osif_vdev;
 	vdev->rx = txrx_ops->rx.rx;
 	vdev->stats_rx = txrx_ops->rx.stats_rx;
+	vdev->tx_comp = txrx_ops->tx.tx_comp;
 	txrx_ops->tx.tx = ol_tx_data;
 }
 
@@ -2547,7 +2524,7 @@ void ol_txrx_set_drop_unenc(ol_txrx_vdev_handle vdev, uint32_t val)
 	vdev->drop_unenc = val;
 }
 
-#if defined(CONFIG_HL_SUPPORT)
+#if defined(CONFIG_HL_SUPPORT) || defined(QCA_LL_LEGACY_TX_FLOW_CONTROL)
 
 static void
 ol_txrx_tx_desc_reset_vdev(ol_txrx_vdev_handle vdev)
@@ -2566,14 +2543,31 @@ ol_txrx_tx_desc_reset_vdev(ol_txrx_vdev_handle vdev)
 }
 
 #else
-
-static void
-ol_txrx_tx_desc_reset_vdev(ol_txrx_vdev_handle vdev)
+#ifdef QCA_LL_TX_FLOW_CONTROL_V2
+static void ol_txrx_tx_desc_reset_vdev(ol_txrx_vdev_handle vdev)
 {
+	struct ol_txrx_pdev_t *pdev = vdev->pdev;
+	struct ol_tx_flow_pool_t *pool;
+	int i;
+	struct ol_tx_desc_t *tx_desc;
 
+	qdf_spin_lock_bh(&pdev->tx_desc.flow_pool_list_lock);
+	for (i = 0; i < pdev->tx_desc.pool_size; i++) {
+		tx_desc = ol_tx_desc_find(pdev, i);
+		if (!qdf_atomic_read(&tx_desc->ref_cnt))
+			/* not in use */
+			continue;
+
+		pool = tx_desc->pool;
+		qdf_spin_lock_bh(&pool->flow_pool_lock);
+		if (tx_desc->vdev == vdev)
+			tx_desc->vdev = NULL;
+		qdf_spin_unlock_bh(&pool->flow_pool_lock);
+	}
+	qdf_spin_unlock_bh(&pdev->tx_desc.flow_pool_list_lock);
 }
-
-#endif
+#endif /* QCA_LL_TX_FLOW_CONTROL_V2 */
+#endif /* CONFIG_HL_SUPPORT */
 
 /**
  * ol_txrx_vdev_detach - Deallocate the specified data virtual
@@ -2928,8 +2922,11 @@ ol_txrx_peer_attach(ol_txrx_vdev_handle vdev, uint8_t *peer_mac_addr)
 	TAILQ_INSERT_TAIL(&vdev->peer_list, peer, peer_list_elem);
 	qdf_spin_unlock_bh(&pdev->peer_ref_mutex);
 	/* check whether this is a real peer (peer mac addr != vdev mac addr) */
-	if (ol_txrx_peer_find_mac_addr_cmp(&vdev->mac_addr, &peer->mac_addr))
+	if (ol_txrx_peer_find_mac_addr_cmp(&vdev->mac_addr, &peer->mac_addr)) {
+		qdf_spin_lock_bh(&pdev->last_real_peer_mutex);
 		vdev->last_real_peer = peer;
+		qdf_spin_unlock_bh(&pdev->last_real_peer_mutex);
+	}
 
 	peer->rx_opt_proc = pdev->rx_opt_proc;
 
@@ -3517,6 +3514,35 @@ ol_txrx_peer_qoscapable_get(struct ol_txrx_pdev_t *txrx_pdev, uint16_t peer_id)
 	return 0;
 }
 
+bool ol_txrx_is_peer_eligible_for_deletion(ol_txrx_peer_handle peer,
+					   struct ol_txrx_pdev_t *pdev)
+{
+	bool peerdel = true;
+	u_int16_t peer_id;
+	int i;
+
+	for (i = 0; i < MAX_NUM_PEER_ID_PER_PEER; i++) {
+		peer_id = peer->peer_ids[i];
+
+		if (peer_id == HTT_INVALID_PEER)
+			continue;
+
+		if (!pdev->peer_id_to_obj_map[peer_id].peer_ref)
+			continue;
+
+		if (pdev->peer_id_to_obj_map[peer_id].peer_ref != peer)
+			continue;
+
+		if (qdf_atomic_read(&pdev->peer_id_to_obj_map[peer_id].
+					del_peer_id_ref_cnt)) {
+			peerdel = false;
+			break;
+		}
+
+		pdev->peer_id_to_obj_map[peer_id].peer_ref = NULL;
+	}
+	return peerdel;
+}
 int ol_txrx_peer_unref_delete(ol_txrx_peer_handle peer,
 					const char *fname,
 					int line)
@@ -3699,7 +3725,32 @@ int ol_txrx_peer_unref_delete(ol_txrx_peer_handle peer,
 			}
 		}
 
-		qdf_mem_free(peer);
+		qdf_spin_lock_bh(&pdev->peer_map_unmap_lock);
+		if (ol_txrx_is_peer_eligible_for_deletion(peer, pdev)) {
+			qdf_mem_free(peer);
+		} else {
+			/*
+			 * Mark this PEER as a stale peer, to be deleted
+			 * during PEER UNMAP. Remove this peer from
+			 * roam_stale_peer_list during UNMAP.
+			 */
+			struct ol_txrx_roam_stale_peer_t *roam_stale_peer;
+
+			roam_stale_peer = qdf_mem_malloc(
+				sizeof(struct ol_txrx_roam_stale_peer_t));
+			if (roam_stale_peer) {
+				roam_stale_peer->peer = peer;
+				TAILQ_INSERT_TAIL(&pdev->roam_stale_peer_list,
+						  roam_stale_peer,
+						  next_stale_entry);
+			} else {
+				QDF_TRACE(QDF_MODULE_ID_TXRX,
+					  QDF_TRACE_LEVEL_ERROR,
+					  "[%s][%d]: No memory allocated",
+					  fname, line);
+			}
+		}
+		qdf_spin_unlock_bh(&pdev->peer_map_unmap_lock);
 	} else {
 		qdf_spin_unlock_bh(&pdev->peer_ref_mutex);
 		QDF_TRACE(QDF_MODULE_ID_TXRX, QDF_TRACE_LEVEL_INFO_HIGH,
@@ -3775,7 +3826,7 @@ QDF_STATUS ol_txrx_clear_peer(uint8_t sta_id)
  *
  * Return: none
  */
-void peer_unmap_timer_handler(void *data)
+void peer_unmap_timer_handler(unsigned long data)
 {
 	ol_txrx_peer_handle peer = (ol_txrx_peer_handle)data;
 
@@ -3788,10 +3839,7 @@ void peer_unmap_timer_handler(void *data)
 		 peer->mac_addr.raw[4], peer->mac_addr.raw[5]);
 	if (!cds_is_driver_recovering() && !cds_is_fw_down()) {
 		wma_peer_debug_dump();
-		if (cds_is_self_recovery_enabled())
-			cds_trigger_recovery(CDS_PEER_UNMAP_TIMEDOUT);
-		else
-			QDF_BUG(0);
+		cds_trigger_recovery(CDS_PEER_UNMAP_TIMEDOUT);
 	} else {
 		WMA_LOGE("%s: Recovery is in progress, ignore!", __func__);
 	}
@@ -3834,9 +3882,6 @@ void ol_txrx_peer_detach(ol_txrx_peer_handle peer, bool start_peer_unmap_timer)
 		   peer->mac_addr.raw[0], peer->mac_addr.raw[1],
 		   peer->mac_addr.raw[2], peer->mac_addr.raw[3],
 		   peer->mac_addr.raw[4], peer->mac_addr.raw[5]);
-
-	if (peer->vdev->last_real_peer == peer)
-		peer->vdev->last_real_peer = NULL;
 
 	qdf_spin_lock_bh(&vdev->pdev->last_real_peer_mutex);
 	if (vdev->last_real_peer == peer)
@@ -4092,11 +4137,152 @@ void
 ol_txrx_fw_stats_cfg(ol_txrx_vdev_handle vdev,
 		     uint8_t cfg_stats_type, uint32_t cfg_val)
 {
-	uint64_t dummy_cookie = 0;
+	uint8_t dummy_cookie = 0;
 
 	htt_h2t_dbg_stats_get(vdev->pdev->htt_pdev, 0 /* upload mask */,
 			      0 /* reset mask */,
 			      cfg_stats_type, cfg_val, dummy_cookie);
+}
+
+/**
+ * ol_txrx_fw_stats_desc_pool_init() - Initialize the fw stats descriptor pool
+ * @pdev: handle to ol txrx pdev
+ * @pool_size: Size of fw stats descriptor pool
+ *
+ * Return: 0 for success, error code on failure.
+ */
+int ol_txrx_fw_stats_desc_pool_init(struct ol_txrx_pdev_t *pdev,
+				    uint8_t pool_size)
+{
+	int i;
+
+	if (!pdev) {
+		ol_txrx_err("%s: pdev is NULL", __func__);
+		return -EINVAL;
+	}
+	pdev->ol_txrx_fw_stats_desc_pool.pool = qdf_mem_malloc(pool_size *
+		sizeof(struct ol_txrx_fw_stats_desc_elem_t));
+	if (!pdev->ol_txrx_fw_stats_desc_pool.pool) {
+		ol_txrx_err("%s: failed to allocate desc pool", __func__);
+		return -ENOMEM;
+	}
+	pdev->ol_txrx_fw_stats_desc_pool.freelist =
+		&pdev->ol_txrx_fw_stats_desc_pool.pool[0];
+	pdev->ol_txrx_fw_stats_desc_pool.pool_size = pool_size;
+
+	for (i = 0; i < (pool_size - 1); i++) {
+		pdev->ol_txrx_fw_stats_desc_pool.pool[i].desc.desc_id = i;
+		pdev->ol_txrx_fw_stats_desc_pool.pool[i].desc.req = NULL;
+		pdev->ol_txrx_fw_stats_desc_pool.pool[i].next =
+			&pdev->ol_txrx_fw_stats_desc_pool.pool[i + 1];
+	}
+	pdev->ol_txrx_fw_stats_desc_pool.pool[i].desc.desc_id = i;
+	pdev->ol_txrx_fw_stats_desc_pool.pool[i].desc.req = NULL;
+	pdev->ol_txrx_fw_stats_desc_pool.pool[i].next = NULL;
+	qdf_spinlock_create(&pdev->ol_txrx_fw_stats_desc_pool.pool_lock);
+	qdf_atomic_init(&pdev->ol_txrx_fw_stats_desc_pool.initialized);
+	qdf_atomic_set(&pdev->ol_txrx_fw_stats_desc_pool.initialized, 1);
+	return 0;
+}
+
+/**
+ * ol_txrx_fw_stats_desc_pool_deinit() - Deinitialize the
+ * fw stats descriptor pool
+ * @pdev: handle to ol txrx pdev
+ *
+ * Return: None
+ */
+void ol_txrx_fw_stats_desc_pool_deinit(struct ol_txrx_pdev_t *pdev)
+{
+	if (!pdev) {
+		ol_txrx_err("%s: pdev is NULL", __func__);
+		return;
+	}
+	if (!qdf_atomic_read(&pdev->ol_txrx_fw_stats_desc_pool.initialized)) {
+		ol_txrx_err("%s: Pool is not initialized", __func__);
+		return;
+	}
+	if (!pdev->ol_txrx_fw_stats_desc_pool.pool) {
+		ol_txrx_err("%s: Pool is not allocated", __func__);
+		return;
+	}
+
+	qdf_spin_lock_bh(&pdev->ol_txrx_fw_stats_desc_pool.pool_lock);
+	qdf_atomic_set(&pdev->ol_txrx_fw_stats_desc_pool.initialized, 0);
+	qdf_mem_free(pdev->ol_txrx_fw_stats_desc_pool.pool);
+	pdev->ol_txrx_fw_stats_desc_pool.pool = NULL;
+
+	pdev->ol_txrx_fw_stats_desc_pool.freelist = NULL;
+	pdev->ol_txrx_fw_stats_desc_pool.pool_size = 0;
+	qdf_spin_unlock_bh(&pdev->ol_txrx_fw_stats_desc_pool.pool_lock);
+}
+
+/**
+ * ol_txrx_fw_stats_desc_alloc() - Get fw stats descriptor from fw stats
+ * free descriptor pool
+ * @pdev: handle to ol txrx pdev
+ *
+ * Return: pointer to fw stats descriptor, NULL on failure
+ */
+struct ol_txrx_fw_stats_desc_t
+	*ol_txrx_fw_stats_desc_alloc(struct ol_txrx_pdev_t *pdev)
+{
+	struct ol_txrx_fw_stats_desc_t *desc = NULL;
+
+	qdf_spin_lock_bh(&pdev->ol_txrx_fw_stats_desc_pool.pool_lock);
+	if (!qdf_atomic_read(&pdev->ol_txrx_fw_stats_desc_pool.initialized)) {
+		qdf_spin_unlock_bh(&pdev->
+				   ol_txrx_fw_stats_desc_pool.pool_lock);
+		ol_txrx_err("%s: Pool deinitialized", __func__);
+		return NULL;
+	}
+	if (pdev->ol_txrx_fw_stats_desc_pool.freelist) {
+		desc = &pdev->ol_txrx_fw_stats_desc_pool.freelist->desc;
+		pdev->ol_txrx_fw_stats_desc_pool.freelist =
+			pdev->ol_txrx_fw_stats_desc_pool.freelist->next;
+	}
+	qdf_spin_unlock_bh(&pdev->ol_txrx_fw_stats_desc_pool.pool_lock);
+
+	if (desc)
+		ol_txrx_dbg("%s: desc_id %d allocated",
+			    __func__, desc->desc_id);
+	else
+		ol_txrx_err("%s: fw stats descriptors are exhausted", __func__);
+
+	return desc;
+}
+
+/**
+ * ol_txrx_fw_stats_desc_get_req() - Put fw stats descriptor
+ * back into free pool
+ * @pdev: handle to ol txrx pdev
+ * @fw_stats_desc: fw_stats_desc_get descriptor
+ *
+ * Return: pointer to request
+ */
+struct ol_txrx_stats_req_internal
+	*ol_txrx_fw_stats_desc_get_req(struct ol_txrx_pdev_t *pdev,
+				       unsigned char desc_id)
+{
+	struct ol_txrx_fw_stats_desc_elem_t *desc_elem;
+	struct ol_txrx_stats_req_internal *req;
+
+	qdf_spin_lock_bh(&pdev->ol_txrx_fw_stats_desc_pool.pool_lock);
+	if (!qdf_atomic_read(&pdev->ol_txrx_fw_stats_desc_pool.initialized)) {
+		qdf_spin_unlock_bh(&pdev->
+				   ol_txrx_fw_stats_desc_pool.pool_lock);
+		ol_txrx_err("%s: Desc ID %u Pool deinitialized",
+			    __func__, desc_id);
+		return NULL;
+	}
+	desc_elem = &pdev->ol_txrx_fw_stats_desc_pool.pool[desc_id];
+	req = desc_elem->desc.req;
+	desc_elem->desc.req = NULL;
+	desc_elem->next =
+		pdev->ol_txrx_fw_stats_desc_pool.freelist;
+	pdev->ol_txrx_fw_stats_desc_pool.freelist = desc_elem;
+	qdf_spin_unlock_bh(&pdev->ol_txrx_fw_stats_desc_pool.pool_lock);
+	return req;
 }
 
 A_STATUS
@@ -4104,8 +4290,10 @@ ol_txrx_fw_stats_get(ol_txrx_vdev_handle vdev, struct ol_txrx_stats_req *req,
 			bool per_vdev, bool response_expected)
 {
 	struct ol_txrx_pdev_t *pdev = vdev->pdev;
-	uint64_t cookie;
+	uint8_t cookie = FW_STATS_DESC_POOL_SIZE;
 	struct ol_txrx_stats_req_internal *non_volatile_req;
+	struct ol_txrx_fw_stats_desc_t *desc = NULL;
+	struct ol_txrx_fw_stats_desc_elem_t *elem = NULL;
 
 	if (!pdev ||
 	    req->stats_type_upload_mask >= 1 << HTT_DBG_NUM_STATS ||
@@ -4125,11 +4313,16 @@ ol_txrx_fw_stats_get(ol_txrx_vdev_handle vdev, struct ol_txrx_stats_req *req,
 	non_volatile_req->base = *req;
 	non_volatile_req->serviced = 0;
 	non_volatile_req->offset = 0;
-
-	/* use the non-volatile request object's address as the cookie */
-	cookie = ol_txrx_stats_ptr_to_u64(non_volatile_req);
-
 	if (response_expected) {
+		desc = ol_txrx_fw_stats_desc_alloc(pdev);
+		if (!desc) {
+			qdf_mem_free(non_volatile_req);
+			return A_ERROR;
+		}
+
+		/* use the desc id as the cookie */
+		cookie = desc->desc_id;
+		desc->req = non_volatile_req;
 		qdf_spin_lock_bh(&pdev->req_list_spinlock);
 		TAILQ_INSERT_TAIL(&pdev->req_list, non_volatile_req, req_list_elem);
 		pdev->req_list_depth++;
@@ -4143,9 +4336,28 @@ ol_txrx_fw_stats_get(ol_txrx_vdev_handle vdev, struct ol_txrx_stats_req *req,
 				  cookie)) {
 		if (response_expected) {
 			qdf_spin_lock_bh(&pdev->req_list_spinlock);
-			TAILQ_REMOVE(&pdev->req_list, non_volatile_req, req_list_elem);
+			TAILQ_REMOVE(&pdev->req_list, non_volatile_req,
+				     req_list_elem);
 			pdev->req_list_depth--;
 			qdf_spin_unlock_bh(&pdev->req_list_spinlock);
+			if (desc) {
+				qdf_spin_lock_bh(&pdev->
+						 ol_txrx_fw_stats_desc_pool.
+						 pool_lock);
+				desc->req = NULL;
+				elem = container_of(desc,
+						    struct
+						    ol_txrx_fw_stats_desc_elem_t,
+						    desc);
+				elem->next =
+					pdev->ol_txrx_fw_stats_desc_pool.
+					freelist;
+				pdev->ol_txrx_fw_stats_desc_pool.
+					freelist = elem;
+				qdf_spin_unlock_bh(&pdev->
+						   ol_txrx_fw_stats_desc_pool.
+						   pool_lock);
+			}
 		}
 
 		qdf_mem_free(non_volatile_req);
@@ -4160,7 +4372,7 @@ ol_txrx_fw_stats_get(ol_txrx_vdev_handle vdev, struct ol_txrx_stats_req *req,
 
 void
 ol_txrx_fw_stats_handler(ol_txrx_pdev_handle pdev,
-			 uint64_t cookie, uint8_t *stats_info_list)
+			 uint8_t cookie, uint8_t *stats_info_list)
 {
 	enum htt_dbg_stats_type type;
 	enum htt_dbg_stats_status status;
@@ -4170,8 +4382,16 @@ ol_txrx_fw_stats_handler(ol_txrx_pdev_handle pdev,
 	int more = 0;
 	int found = 0;
 
-	req = ol_txrx_u64_to_stats_ptr(cookie);
-
+	if (cookie >= FW_STATS_DESC_POOL_SIZE) {
+		ol_txrx_err("%s: Cookie is not valid", __func__);
+		return;
+	}
+	req = ol_txrx_fw_stats_desc_get_req(pdev, (uint8_t)cookie);
+	if (!req) {
+		ol_txrx_err("%s: Request not retrieved for cookie %u", __func__,
+			    (uint8_t)cookie);
+		return;
+	}
 	qdf_spin_lock_bh(&pdev->req_list_spinlock);
 	TAILQ_FOREACH(tmp, &pdev->req_list, req_list_elem) {
 		if (req == tmp) {
@@ -4548,11 +4768,13 @@ static void ol_txrx_disp_peer_stats(ol_txrx_pdev_handle pdev)
 		return;
 
 	for (i = 0; i < OL_TXRX_NUM_LOCAL_PEER_IDS; i++) {
+		qdf_spin_lock_bh(&pdev->peer_ref_mutex);
 		qdf_spin_lock_bh(&pdev->local_peer_ids.lock);
 		peer = pdev->local_peer_ids.map[i];
 		if (peer)
 			OL_TXRX_PEER_INC_REF_CNT(peer);
 		qdf_spin_unlock_bh(&pdev->local_peer_ids.lock);
+		qdf_spin_unlock_bh(&pdev->peer_ref_mutex);
 
 		if (peer) {
 			QDF_TRACE(QDF_MODULE_ID_TXRX, QDF_TRACE_LEVEL_ERROR,
@@ -5057,6 +5279,11 @@ void ol_txrx_ipa_uc_set_quota(ol_txrx_pdev_handle pdev, uint64_t quota_bytes)
 {
 	htt_h2t_ipa_uc_set_quota(pdev->htt_pdev, quota_bytes);
 }
+
+int ol_txrx_rx_hash_smmu_map(ol_txrx_pdev_handle pdev, bool map)
+{
+	return htt_rx_hash_smmu_map_update(pdev->htt_pdev, map);
+}
 #endif /* IPA_UC_OFFLOAD */
 
 QDF_STATUS ol_txrx_display_stats(uint16_t value,
@@ -5203,9 +5430,10 @@ static inline int ol_txrx_drop_nbuf_list(qdf_nbuf_t buf_list)
  *
  * Return: None
  */
-static void ol_rx_data_cb(struct ol_txrx_pdev_t *pdev,
-			  qdf_nbuf_t buf_list, uint16_t staid)
+static void ol_rx_data_cb(void *_pdev, void *_buf_list, uint16_t staid)
 {
+	struct ol_txrx_pdev_t *pdev = (struct ol_txrx_pdev_t *)_pdev;
+	qdf_nbuf_t buf_list = (qdf_nbuf_t)_buf_list;
 	void *cds_ctx = cds_get_global_context();
 	void *osif_dev;
 	uint8_t drop_count = 0;
@@ -5405,8 +5633,7 @@ void ol_rx_data_process(struct ol_txrx_peer_t *peer,
 			if (!pkt)
 				goto drop_rx_buf;
 
-			pkt->callback = (cds_ol_rx_thread_cb)
-					ol_rx_data_cb;
+			pkt->callback = ol_rx_data_cb;
 			pkt->context = (void *)pdev;
 			pkt->Rxpkt = (void *)rx_buf_list;
 			pkt->staId = peer->local_id;

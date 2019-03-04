@@ -1,8 +1,5 @@
 /*
- * Copyright (c) 2011-2017 The Linux Foundation. All rights reserved.
- *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
+ * Copyright (c) 2011-2018 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 /*
@@ -69,60 +60,6 @@ static tBeaconFilterIe beacon_filter_table[] = {
 	{SIR_MAC_VHT_OPMODE_EID, 0, {0, 0, 0, 0} },
 	{SIR_MAC_VHT_OPERATION_EID, 0, {0, 0, VHTOP_CHWIDTH_MASK, 0} }
 };
-
-/**
- * lim_send_cf_params()
- *
- ***FUNCTION:
- * This function is called to send CFP Parameters to WMA, when they are changed.
- *
- ***LOGIC:
- *
- ***ASSUMPTIONS:
- * NA
- *
- ***NOTE:
- * NA
- *
- * @param pMac  pointer to Global Mac structure.
- * @param bssIdx Bss Index of the BSS to which STA is associated.
- * @param cfpCount CFP Count, if that is changed.
- * @param cfpPeriod CFP Period if that is changed.
- *
- * @return success if message send is ok, else false.
- */
-tSirRetStatus lim_send_cf_params(tpAniSirGlobal pMac, uint8_t bssIdx,
-				 uint8_t cfpCount, uint8_t cfpPeriod)
-{
-	tpUpdateCFParams pCFParams = NULL;
-	tSirRetStatus retCode = eSIR_SUCCESS;
-	tSirMsgQ msgQ;
-
-	pCFParams = qdf_mem_malloc(sizeof(tUpdateCFParams));
-	if (NULL == pCFParams) {
-		pe_err("Unable to allocate memory during Update CF Params");
-		retCode = eSIR_MEM_ALLOC_FAILED;
-		goto returnFailure;
-	}
-	pCFParams->cfpCount = cfpCount;
-	pCFParams->cfpPeriod = cfpPeriod;
-	pCFParams->bssIdx = bssIdx;
-
-	msgQ.type = WMA_UPDATE_CF_IND;
-	msgQ.reserved = 0;
-	msgQ.bodyptr = pCFParams;
-	msgQ.bodyval = 0;
-	pe_debug("Sending WMA_UPDATE_CF_IND");
-	MTRACE(mac_trace_msg_tx(pMac, NO_SESSION, msgQ.type));
-	retCode = wma_post_ctrl_msg(pMac, &msgQ);
-	if (eSIR_SUCCESS != retCode) {
-		qdf_mem_free(pCFParams);
-		pe_err("Posting WMA_UPDATE_CF_IND failed, reason=%X",
-			retCode);
-	}
-returnFailure:
-	return retCode;
-}
 
 /**
  * lim_send_beacon_params() - updates bcn params to WMA
@@ -173,7 +110,7 @@ tSirRetStatus lim_send_beacon_params(tpAniSirGlobal pMac,
 		pe_err("Posting WMA_UPDATE_BEACON_IND, reason=%X",
 			retCode);
 	}
-	lim_send_beacon_ind(pMac, psessionEntry);
+	lim_send_beacon_ind(pMac, psessionEntry, REASON_DEFAULT);
 	return retCode;
 }
 
@@ -236,7 +173,8 @@ tSirRetStatus lim_send_switch_chnl_params(tpAniSirGlobal pMac,
 	pChnlParams->vhtCapable = pSessionEntry->vhtCapability;
 	pChnlParams->dot11_mode = pSessionEntry->dot11mode;
 	pChnlParams->nss = pSessionEntry->nss;
-	pe_debug("nss value: %d", pChnlParams->nss);
+	pe_debug("nss value: %d dot11_mode %d",
+		 pChnlParams->nss, pChnlParams->dot11_mode);
 
 	/*Set DFS flag for DFS channel */
 	if (ch_width == CH_WIDTH_160MHZ) {

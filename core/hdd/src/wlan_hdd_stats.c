@@ -1,9 +1,6 @@
 /*
  * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
  *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
- *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all
@@ -34,6 +31,7 @@
 #include "hif.h"
 #include "wlan_hdd_hostapd.h"
 #include "wlan_hdd_debugfs_llstat.h"
+#include "wlan_hdd_request_manager.h"
 #include "wma_api.h"
 #include "wma.h"
 
@@ -129,7 +127,6 @@ static int rssi_mcs_tbl[][10] = {
 
 
 #ifdef WLAN_FEATURE_LINK_LAYER_STATS
-static struct hdd_ll_stats_context ll_stats_context;
 
 /**
  * put_wifi_rate_stat() - put wifi rate stats
@@ -1032,20 +1029,22 @@ static void hdd_ll_process_peer_stats(hdd_adapter_t *adapter,
  * @ctx: Pointer to hdd context
  * @indType: Indication type
  * @pRsp: Pointer to response
+ * @cookie: Callback context
  *
  * After receiving Link Layer indications from FW.This callback converts the
  * firmware data to the NL data and send the same to the kernel/upper layers.
  *
  * Return: None
  */
-void wlan_hdd_cfg80211_link_layer_stats_callback(void *ctx,
-							int indType, void *pRsp)
+void wlan_hdd_cfg80211_link_layer_stats_callback(void *ctx, int indType,
+						 void *pRsp, void *cookie)
 {
 	hdd_context_t *pHddCtx = (hdd_context_t *) ctx;
-	struct hdd_ll_stats_context *context;
+	struct hdd_ll_stats_priv *priv = NULL;
 	hdd_adapter_t *pAdapter = NULL;
 	tpSirLLStatsResults linkLayerStatsResults = (tpSirLLStatsResults) pRsp;
 	int status;
+	struct hdd_request *request = NULL;
 
 	status = wlan_hdd_validate_context(pHddCtx);
 	if (status)
@@ -1054,7 +1053,7 @@ void wlan_hdd_cfg80211_link_layer_stats_callback(void *ctx,
 	pAdapter = hdd_get_adapter_by_vdev(pHddCtx,
 					   linkLayerStatsResults->ifaceId);
 
-	if (NULL == pAdapter) {
+	if (!pAdapter) {
 		hdd_err("vdev_id %d does not exist with host",
 			linkLayerStatsResults->ifaceId);
 		return;
@@ -1073,18 +1072,23 @@ void wlan_hdd_cfg80211_link_layer_stats_callback(void *ctx,
 			linkLayerStatsResults->num_radio,
 			linkLayerStatsResults->results);
 
-		context = &ll_stats_context;
-		spin_lock(&context->context_lock);
-		/* validate response received from target */
-		if ((context->request_id != linkLayerStatsResults->rspId) ||
-		  !(context->request_bitmap & linkLayerStatsResults->paramId)) {
-			spin_unlock(&context->context_lock);
-			hdd_err("Error : Request id %d response id %d request bitmap 0x%x response bitmap 0x%x",
-			context->request_id, linkLayerStatsResults->rspId,
-			context->request_bitmap, linkLayerStatsResults->paramId);
+		request = hdd_request_get(cookie);
+		if (!request) {
+			hdd_err("Obselete request");
 			return;
 		}
-		spin_unlock(&context->context_lock);
+
+		priv = hdd_request_priv(request);
+
+		/* validate response received from target */
+		if ((priv->request_id != linkLayerStatsResults->rspId) ||
+		    !(priv->request_bitmap & linkLayerStatsResults->paramId)) {
+			hdd_err("Error : Request id %d response id %d request bitmap 0x%x response bitmap 0x%x",
+			priv->request_id, linkLayerStatsResults->rspId,
+			priv->request_bitmap, linkLayerStatsResults->paramId);
+			hdd_request_put(request);
+			return;
+		}
 
 		if (linkLayerStatsResults->paramId & WMI_LINK_STATS_RADIO) {
 			hdd_ll_process_radio_stats(pAdapter,
@@ -1093,10 +1097,8 @@ void wlan_hdd_cfg80211_link_layer_stats_callback(void *ctx,
 				linkLayerStatsResults->num_radio,
 				linkLayerStatsResults->rspId);
 
-			spin_lock(&context->context_lock);
 			if (!linkLayerStatsResults->moreResultToFollow)
-				context->request_bitmap &= ~(WMI_LINK_STATS_RADIO);
-			spin_unlock(&context->context_lock);
+				priv->request_bitmap &= ~(WMI_LINK_STATS_RADIO);
 
 		} else if (linkLayerStatsResults->paramId &
 				WMI_LINK_STATS_IFACE) {
@@ -1105,17 +1107,15 @@ void wlan_hdd_cfg80211_link_layer_stats_callback(void *ctx,
 				linkLayerStatsResults->num_peers,
 				linkLayerStatsResults->rspId);
 
-			spin_lock(&context->context_lock);
 			/* Firmware doesn't send peerstats event if no peers are
 			 * connected. HDD should not wait for any peerstats in
 			 * this case and return the status to middleware after
 			 * receiving iface stats
 			 */
 			if (!linkLayerStatsResults->num_peers)
-				context->request_bitmap &=
+				priv->request_bitmap &=
 					~(WMI_LINK_STATS_ALL_PEER);
-			context->request_bitmap &= ~(WMI_LINK_STATS_IFACE);
-			spin_unlock(&context->context_lock);
+			priv->request_bitmap &= ~(WMI_LINK_STATS_IFACE);
 
 		} else if (linkLayerStatsResults->
 			   paramId & WMI_LINK_STATS_ALL_PEER) {
@@ -1124,21 +1124,19 @@ void wlan_hdd_cfg80211_link_layer_stats_callback(void *ctx,
 				linkLayerStatsResults->results,
 				linkLayerStatsResults->rspId);
 
-			spin_lock(&context->context_lock);
 			if (!linkLayerStatsResults->moreResultToFollow)
-				context->request_bitmap &= ~(WMI_LINK_STATS_ALL_PEER);
-			spin_unlock(&context->context_lock);
+				priv->request_bitmap &=
+						~(WMI_LINK_STATS_ALL_PEER);
 
 		} else {
 			hdd_err("INVALID LL_STATS_NOTIFY RESPONSE");
 		}
 
-		spin_lock(&context->context_lock);
 		/* complete response event if all requests are completed */
-		if (0 == context->request_bitmap)
-			complete(&context->response_event);
-		spin_unlock(&context->context_lock);
+		if (!priv->request_bitmap)
+			hdd_request_complete(request);
 
+		hdd_request_put(request);
 		break;
 	}
 	default:
@@ -1214,6 +1212,17 @@ __wlan_hdd_cfg80211_ll_stats_set(struct wiphy *wiphy,
 	status = wlan_hdd_validate_context(pHddCtx);
 	if (0 != status)
 		return -EINVAL;
+
+	if (hdd_validate_adapter(pAdapter)) {
+		hdd_err("Invalid Adapter");
+		return -EINVAL;
+	}
+
+	if (pAdapter->device_mode != QDF_STA_MODE) {
+		hdd_debug("Cannot set LL_STATS for device mode %d",
+			  pAdapter->device_mode);
+		return -EINVAL;
+	}
 
 	if (hdd_nla_parse(tb_vendor, QCA_WLAN_VENDOR_ATTR_LL_STATS_SET_MAX,
 			  (struct nlattr *)data, data_len,
@@ -1303,34 +1312,59 @@ nla_policy
 	[QCA_WLAN_VENDOR_ATTR_LL_STATS_GET_CONFIG_REQ_MASK] = {.type = NLA_U32}
 };
 
+/**
+ * wlan_hdd_send_ll_stats_req() - send LL stats request
+ * @hdd_ctx: pointer to hdd context
+ * @req: pointer to LL stats get request
+ *
+ * Return: 0 if success, non-zero if failure
+ */
 static int wlan_hdd_send_ll_stats_req(hdd_context_t *hdd_ctx,
 				      tSirLLStatsGetReq *req)
 {
-	unsigned long rc;
-	struct hdd_ll_stats_context *context;
+	int ret = 0;
+	struct hdd_ll_stats_priv *priv = NULL;
+	struct hdd_request *request = NULL;
+	void *cookie = NULL;
+	static const struct hdd_request_params params = {
+		.priv_size = sizeof(*priv),
+		.timeout_ms = WLAN_WAIT_TIME_LL_STATS,
+	};
 
-	context = &ll_stats_context;
-	spin_lock(&context->context_lock);
-	context->request_id = req->reqId;
-	context->request_bitmap = req->paramIdMask;
-	INIT_COMPLETION(context->response_event);
-	spin_unlock(&context->context_lock);
+	ENTER();
+
+	request = hdd_request_alloc(&params);
+	if (!request) {
+		hdd_err("Request Allocation Failure");
+		return -ENOMEM;
+	}
+
+	cookie = hdd_request_cookie(request);
+
+	priv = hdd_request_priv(request);
+
+	priv->request_id = req->reqId;
+	priv->request_bitmap = req->paramIdMask;
 
 	if (QDF_STATUS_SUCCESS !=
-			sme_ll_stats_get_req(hdd_ctx->hHal, req)) {
+			sme_ll_stats_get_req(hdd_ctx->hHal, req, cookie)) {
 		hdd_err("sme_ll_stats_get_req Failed");
-		return -EINVAL;
+		ret = -EINVAL;
+		goto exit;
 	}
 
-	rc = wait_for_completion_timeout(&context->response_event,
-			msecs_to_jiffies(WLAN_WAIT_TIME_LL_STATS));
-	if (!rc) {
+	ret = hdd_request_wait_for_response(request);
+	if (ret) {
 		hdd_err("Target response timed out request id %d request bitmap 0x%x",
-			context->request_id, context->request_bitmap);
-		return -ETIMEDOUT;
+			priv->request_id, priv->request_bitmap);
+		ret = -ETIMEDOUT;
+		goto exit;
 	}
+	EXIT();
 
-	return 0;
+exit:
+	hdd_request_put(request);
+	return ret;
 }
 
 int wlan_hdd_ll_stats_get(hdd_adapter_t *adapter, uint32_t req_id,
@@ -1357,9 +1391,10 @@ int wlan_hdd_ll_stats_get(hdd_adapter_t *adapter, uint32_t req_id,
 		return -EBUSY;
 	}
 
-	if (!adapter->isLinkLayerStatsSet)
-		hdd_info("isLinkLayerStatsSet: %d; STATs will be all zero",
-			adapter->isLinkLayerStatsSet);
+	if (!adapter->isLinkLayerStatsSet) {
+		hdd_info("LL_STATs not set");
+		return -EINVAL;
+	}
 
 	get_req.reqId = req_id;
 	get_req.paramIdMask = req_mask;
@@ -3794,77 +3829,58 @@ static void wlan_hdd_fill_rate_info(hdd_ap_ctx_t *ap_ctx,
 			flags);
 }
 
+struct peer_info_priv {
+	struct sir_peer_sta_ext_info peer_sta_ext_info;
+};
+
 /**
  * wlan_hdd_get_peer_info_cb() - get peer info callback
  * @sta_info: pointer of peer information
  * @context: get peer info callback context
  *
- * This function will fill stats info of AP Context
+ * This function will fill stats info to peer info priv
  *
  */
 static void wlan_hdd_get_peer_info_cb(struct sir_peer_info_ext_resp *sta_info,
-		void *context)
+				      void *context)
 {
-	struct statsContext *get_peer_info_context;
-	struct sir_peer_info_ext *peer_info;
-	hdd_adapter_t *adapter;
-	hdd_ap_ctx_t *ap_ctx;
+	struct hdd_request *request;
+	struct peer_info_priv *priv;
+	uint8_t sta_num;
 
-	if ((sta_info == NULL) || (context == NULL)) {
-		hdd_err("Bad param, sta_info [%pK] context [%pK]",
-			sta_info, context);
-		return;
-	}
-
-	spin_lock(&hdd_context_lock);
-	/*
-	 * there is a race condition that exists between this callback
-	 * function and the caller since the caller could time out either
-	 * before or while this code is executing.  we use a spinlock to
-	 * serialize these actions
-	 */
-	get_peer_info_context = context;
-	if (PEER_INFO_CONTEXT_MAGIC !=
-			get_peer_info_context->magic) {
-		/*
-		 * the caller presumably timed out so there is nothing
-		 * we can do
-		 */
-		spin_unlock(&hdd_context_lock);
-		hdd_warn("Invalid context, magic [%08x]",
-			get_peer_info_context->magic);
+	if (!sta_info) {
+		hdd_err("Bad param, sta_info [%pK]",
+			sta_info);
 		return;
 	}
 
 	if (!sta_info->count) {
-		spin_unlock(&hdd_context_lock);
 		hdd_err("Fail to get remote peer info");
 		return;
 	}
 
-	adapter = get_peer_info_context->pAdapter;
-	ap_ctx = WLAN_HDD_GET_AP_CTX_PTR(adapter);
-	qdf_mem_zero(&ap_ctx->txrx_stats,
-			sizeof(ap_ctx->txrx_stats));
+	if (sta_info->count > MAX_PEER_STA) {
+		hdd_warn("Exceed max peer number %d", sta_info->count);
+		sta_num = MAX_PEER_STA;
+	} else {
+		sta_num = sta_info->count;
+	}
 
-	peer_info = sta_info->info;
-	ap_ctx->txrx_stats.tx_packets = peer_info->tx_packets;
-	ap_ctx->txrx_stats.tx_bytes = peer_info->tx_bytes;
-	ap_ctx->txrx_stats.rx_packets = peer_info->rx_packets;
-	ap_ctx->txrx_stats.rx_bytes = peer_info->rx_bytes;
-	ap_ctx->txrx_stats.tx_retries = peer_info->tx_retries;
-	ap_ctx->txrx_stats.tx_failed = peer_info->tx_failed;
-	ap_ctx->txrx_stats.rssi =
-		peer_info->rssi + WLAN_HDD_TGT_NOISE_FLOOR_DBM;
-	wlan_hdd_fill_rate_info(ap_ctx, peer_info);
+	request = hdd_request_get(context);
+	if (!request) {
+		hdd_err("Obsolete request");
+		return;
+	}
 
-	get_peer_info_context->magic = 0;
+	priv = hdd_request_priv(request);
 
-	/* notify the caller */
-	complete(&get_peer_info_context->completion);
+	priv->peer_sta_ext_info.sta_num = sta_num;
+	qdf_mem_copy(&priv->peer_sta_ext_info.info,
+		     sta_info->info,
+		     sta_num * sizeof(sta_info->info[0]));
 
-	/* serialization is complete */
-	spin_unlock(&hdd_context_lock);
+	hdd_request_complete(request);
+	hdd_request_put(request);
 }
 
 /**
@@ -3880,54 +3896,77 @@ static int wlan_hdd_get_peer_info(hdd_adapter_t *adapter,
 					struct qdf_mac_addr macaddress)
 {
 	QDF_STATUS status;
+	void *cookie;
 	int ret;
-	static struct statsContext context;
+	hdd_ap_ctx_t *ap_ctx = NULL;
 	struct sir_peer_info_ext_req peer_info_req;
+	struct hdd_request *request;
+	struct peer_info_priv *priv;
+	static const struct hdd_request_params params = {
+		.priv_size = sizeof(*priv),
+		.timeout_ms = WLAN_WAIT_TIME_STATS,
+	};
 
-	if (adapter == NULL) {
-		hdd_err("pAdapter is NULL");
+	if (!adapter) {
+		hdd_err("adapter is NULL");
 		return -EFAULT;
 	}
 
-	init_completion(&context.completion);
-	context.magic = PEER_INFO_CONTEXT_MAGIC;
-	context.pAdapter = adapter;
+	request = hdd_request_alloc(&params);
+	if (!request) {
+		hdd_err("Request allocation failure");
+		return -ENOMEM;
+	}
 
-	qdf_mem_copy(&(peer_info_req.peer_macaddr), &macaddress,
-			QDF_MAC_ADDR_SIZE);
+	cookie = hdd_request_cookie(request);
+	priv = hdd_request_priv(request);
+
+	qdf_mem_copy(&peer_info_req.peer_macaddr, &macaddress,
+		     QDF_MAC_ADDR_SIZE);
 	peer_info_req.sessionid = adapter->sessionId;
 	peer_info_req.reset_after_request = 0;
 	status = sme_get_peer_info_ext(WLAN_HDD_GET_HAL_CTX(adapter),
-			&peer_info_req,
-			&context,
-			wlan_hdd_get_peer_info_cb);
+				       &peer_info_req,
+				       cookie,
+				       wlan_hdd_get_peer_info_cb);
 	if (status != QDF_STATUS_SUCCESS) {
 		hdd_err("Unable to retrieve statistics for peer info");
 		ret = -EFAULT;
 	} else {
-		if (!wait_for_completion_timeout(&context.completion,
-				msecs_to_jiffies(WLAN_WAIT_TIME_STATS))) {
+		ret = hdd_request_wait_for_response(request);
+		if (ret) {
 			hdd_err("SME timed out while retrieving peer info");
 			ret = -EFAULT;
-		} else
+		} else {
+			/* only support one peer by now */
+			ap_ctx = WLAN_HDD_GET_AP_CTX_PTR(adapter);
+			qdf_mem_zero(&ap_ctx->txrx_stats,
+				     sizeof(struct hdd_fw_txrx_stats));
+
+			ap_ctx->txrx_stats.tx_packets =
+				priv->peer_sta_ext_info.info[0].tx_packets;
+			ap_ctx->txrx_stats.tx_bytes =
+				priv->peer_sta_ext_info.info[0].tx_bytes;
+			ap_ctx->txrx_stats.rx_packets =
+				priv->peer_sta_ext_info.info[0].rx_packets;
+			ap_ctx->txrx_stats.rx_bytes =
+				priv->peer_sta_ext_info.info[0].rx_bytes;
+			ap_ctx->txrx_stats.tx_retries =
+				priv->peer_sta_ext_info.info[0].tx_retries;
+			ap_ctx->txrx_stats.tx_failed =
+				priv->peer_sta_ext_info.info[0].tx_failed;
+			ap_ctx->txrx_stats.rssi =
+				priv->peer_sta_ext_info.info[0].rssi +
+				WLAN_HDD_TGT_NOISE_FLOOR_DBM;
+			wlan_hdd_fill_rate_info(ap_ctx,
+				&priv->peer_sta_ext_info.info[0]);
 			ret = 0;
+
+		}
 	}
-	/*
-	 * either we never sent a request, we sent a request and received a
-	 * response or we sent a request and timed out.  if we never sent a
-	 * request or if we sent a request and got a response, we want to
-	 * clear the magic out of paranoia.  if we timed out there is a
-	 * race condition such that the callback function could be
-	 * executing at the same time we are. of primary concern is if the
-	 * callback function had already verified the "magic" but had not
-	 * yet set the completion variable when a timeout occurred. we
-	 * serialize these activities by invalidating the magic while
-	 * holding a shared spinlock which will cause us to block if the
-	 * callback is currently executing
-	 */
-	spin_lock(&hdd_context_lock);
-	context.magic = 0;
-	spin_unlock(&hdd_context_lock);
+
+	hdd_request_put(request);
+
 	return ret;
 }
 
@@ -4089,25 +4128,26 @@ static int __wlan_hdd_cfg80211_get_station(struct wiphy *wiphy,
 
 	wlan_hdd_get_station_stats(pAdapter);
 
-	if (pAdapter->hdd_stats.summary_stat.rssi)
-		pAdapter->rssi = pAdapter->hdd_stats.summary_stat.rssi;
+	pAdapter->rssi = pAdapter->hdd_stats.summary_stat.rssi;
+	snr = pAdapter->hdd_stats.summary_stat.snr;
 
 	/* for new connection there might be no valid previous RSSI */
 	if (!pAdapter->rssi) {
 		hdd_get_rssi_snr_by_bssid(pAdapter,
 				pHddStaCtx->conn_info.bssId.bytes,
-				&pAdapter->rssi, NULL);
+				&pAdapter->rssi, &snr);
 	}
 
 	sinfo->signal = pAdapter->rssi;
-	snr = pAdapter->hdd_stats.summary_stat.snr;
 	hdd_debug("snr: %d, rssi: %d",
 		pAdapter->hdd_stats.summary_stat.snr,
 		pAdapter->hdd_stats.summary_stat.rssi);
 	pHddStaCtx->conn_info.signal = sinfo->signal;
+	pHddStaCtx->cache_conn_info.signal = sinfo->signal;
 	pHddStaCtx->conn_info.noise =
 		pHddStaCtx->conn_info.signal - snr;
 
+	pHddStaCtx->cache_conn_info.noise = pHddStaCtx->conn_info.noise;
 	wlan_hdd_fill_station_info_signal(sinfo);
 
 	/*
@@ -4527,6 +4567,8 @@ static int __wlan_hdd_cfg80211_get_station(struct wiphy *wiphy,
 
 	qdf_mem_copy(&pHddStaCtx->conn_info.txrate,
 		     &sinfo->txrate, sizeof(sinfo->txrate));
+	qdf_mem_copy(&pHddStaCtx->cache_conn_info.txrate,
+		     &sinfo->txrate, sizeof(sinfo->txrate));
 
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)) && !defined(WITH_BACKPORTS)
 	sinfo->filled |= STATION_INFO_TX_BITRATE |
@@ -4834,17 +4876,6 @@ int wlan_hdd_cfg80211_dump_survey(struct wiphy *wiphy,
 
 	return ret;
 }
-/**
- * hdd_init_ll_stats_ctx() - initialize link layer stats context
- *
- * Return: none
- */
-inline void hdd_init_ll_stats_ctx(void)
-{
-	spin_lock_init(&ll_stats_context.context_lock);
-	init_completion(&ll_stats_context.response_event);
-	ll_stats_context.request_bitmap = 0;
-}
 
 /**
  * hdd_display_hif_stats() - display hif stats
@@ -4940,59 +4971,37 @@ static bool hdd_is_rcpi_applicable(hdd_adapter_t *adapter,
 
 /**
  * wlan_hdd_get_rcpi_cb() - callback function for rcpi response
- * @context: Pointer to rcpi context
- * @rcpi_req: Pointer to rcpi response
+ * @context: used to refer cookie in hdd request manager
+ * @mac_addr: destination mac address for which RCPI is computed
+ * @rcpi: RCPI value from firmware
+ * @status: status of RCPI computation
  *
  * Return: None
  */
 static void wlan_hdd_get_rcpi_cb(void *context, struct qdf_mac_addr mac_addr,
 				 int32_t rcpi, QDF_STATUS status)
 {
-	hdd_adapter_t *adapter;
-	struct statsContext *rcpi_context;
+	struct hdd_request *request;
+	struct rcpi_info *priv;
 
-	if (!context) {
-		hdd_err("No rcpi context");
+	request = hdd_request_get(context);
+	if (!request) {
+		hdd_err("Obsolete RCPI request");
 		return;
 	}
 
-	rcpi_context = context;
-	adapter = rcpi_context->pAdapter;
-	if (adapter->magic != WLAN_HDD_ADAPTER_MAGIC) {
-		hdd_err("Invalid adapter magic");
-		return;
+	priv = hdd_request_priv(request);
+	priv->mac_addr = mac_addr;
+
+	if (!QDF_IS_STATUS_SUCCESS(status)) {
+		priv->rcpi = 0;
+		hdd_err("Error in computing RCPI");
+	} else {
+		priv->rcpi = rcpi;
 	}
 
-	/*
-	 * there is a race condition that exists between this callback
-	 * function and the caller since the caller could time out
-	 * either before or while this code is executing.  we use a
-	 * spinlock to serialize these actions
-	 */
-	spin_lock(&hdd_context_lock);
-	if (rcpi_context->magic != RCPI_CONTEXT_MAGIC) {
-		/*
-		 * the caller presumably timed out so there is nothing
-		 * we can do
-		 */
-		spin_unlock(&hdd_context_lock);
-		hdd_warn("Invalid RCPI context magic");
-		return;
-	}
-
-	rcpi_context->magic = 0;
-	adapter->rcpi.mac_addr = mac_addr;
-	if (status != QDF_STATUS_SUCCESS)
-		/* peer rcpi is not available for requested mac addr */
-		adapter->rcpi.rcpi = 0;
-	else
-		adapter->rcpi.rcpi = rcpi;
-
-	/* notify the caller */
-	complete(&rcpi_context->completion);
-
-	/* serialization is complete */
-	spin_unlock(&hdd_context_lock);
+	hdd_request_complete(request);
+	hdd_request_put(request);
 }
 
 /**
@@ -5010,12 +5019,17 @@ static int __wlan_hdd_get_rcpi(hdd_adapter_t *adapter,
 			       enum rcpi_measurement_type measurement_type)
 {
 	hdd_context_t *hdd_ctx;
-	static struct statsContext rcpi_context;
-	int status = 0;
-	unsigned long rc;
+	int status = 0, ret = 0;
 	struct qdf_mac_addr mac_addr;
 	QDF_STATUS qdf_status = QDF_STATUS_SUCCESS;
 	struct sme_rcpi_req *rcpi_req;
+	void *cookie;
+	struct rcpi_info *priv;
+	struct hdd_request *request;
+	static const struct hdd_request_params params = {
+		.priv_size = sizeof(*priv),
+		.timeout_ms = WLAN_WAIT_TIME_RCPI,
+	};
 	bool reassoc;
 
 	ENTER();
@@ -5061,47 +5075,51 @@ static int __wlan_hdd_get_rcpi(hdd_adapter_t *adapter,
 		return -EINVAL;
 	}
 
-	init_completion(&rcpi_context.completion);
-	rcpi_context.pAdapter = adapter;
-	rcpi_context.magic = RCPI_CONTEXT_MAGIC;
+	request = hdd_request_alloc(&params);
+	if (!request) {
+		hdd_err("Request allocation failure");
+		qdf_mem_free(rcpi_req);
+		return -ENOMEM;
+	}
+	cookie = hdd_request_cookie(request);
 
 	rcpi_req->mac_addr = mac_addr;
 	rcpi_req->session_id = adapter->sessionId;
 	rcpi_req->measurement_type = measurement_type;
 	rcpi_req->rcpi_callback = wlan_hdd_get_rcpi_cb;
-	rcpi_req->rcpi_context = &rcpi_context;
+	rcpi_req->rcpi_context = cookie;
 
 	qdf_status = sme_get_rcpi(hdd_ctx->hHal, rcpi_req);
-	if (qdf_status != QDF_STATUS_SUCCESS) {
+	if (!QDF_IS_STATUS_SUCCESS(qdf_status)) {
 		hdd_err("Unable to retrieve RCPI");
 		status = qdf_status_to_os_return(qdf_status);
-	} else {
-		/* request was sent -- wait for the response */
-		rc = wait_for_completion_timeout(&rcpi_context.completion,
-					msecs_to_jiffies(WLAN_WAIT_TIME_RCPI));
-		if (!rc) {
-			hdd_err("SME timed out while retrieving RCPI");
-			status = -EINVAL;
-		}
+		goto out;
 	}
+
+	/* request was sent -- wait for the response */
+	ret = hdd_request_wait_for_response(request);
+	if (ret) {
+		hdd_err("SME timed out while retrieving RCPI");
+		status = -EINVAL;
+		goto out;
+	}
+
+	/* update the adapter with the fresh results */
+	priv = hdd_request_priv(request);
+	adapter->rcpi.mac_addr = priv->mac_addr;
+	adapter->rcpi.rcpi = priv->rcpi;
+
+	if (qdf_mem_cmp(&mac_addr, &priv->mac_addr, sizeof(mac_addr))) {
+		hdd_err("mis match of mac addr from call-back");
+		status = -EINVAL;
+		goto out;
+	}
+
+	*rcpi_value = adapter->rcpi.rcpi;
+	hdd_debug("RCPI = %d", *rcpi_value);
+out:
 	qdf_mem_free(rcpi_req);
-
-	spin_lock(&hdd_context_lock);
-	rcpi_context.magic = 0;
-	spin_unlock(&hdd_context_lock);
-
-	if (status) {
-		hdd_err("rcpi computation is failed");
-	} else {
-		if (qdf_mem_cmp(&mac_addr, &adapter->rcpi.mac_addr,
-		    sizeof(mac_addr))) {
-			hdd_err("mac addr is not matching from call-back");
-			status = -EINVAL;
-		} else {
-			*rcpi_value = adapter->rcpi.rcpi;
-			hdd_debug("RCPI = %d", *rcpi_value);
-		}
-	}
+	hdd_request_put(request);
 
 	EXIT();
 	return status;

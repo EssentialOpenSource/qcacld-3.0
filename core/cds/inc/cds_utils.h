@@ -1,9 +1,6 @@
 /*
  * Copyright (c) 2014-2018 The Linux Foundation. All rights reserved.
  *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
- *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 #if !defined(__CDS_UTILS_H)
@@ -110,6 +101,11 @@ enum cds_band_type {
  *			off the async scan
  * ENABLE_DBS_CXN_AND_ENABLE_SCAN_WITH_ASYNC_SCAN_OFF: enable dbs support for
  *			connection and scan but switch off the async scan
+ * ENABLE_DBS_CXN_AND_DISABLE_DBS_SCAN: Enable DBS support for connection and
+ *          disable DBS support for scan
+ * ENABLE_DBS_CXN_AND_DISABLE_SIMULTANEOUS_SCAN: Enable DBS
+ *          support for connection and disable simultaneous scan
+ *          from upper layer (DBS scan remains enabled in FW)
  */
 enum dbs_support {
 	ENABLE_DBS_CXN_AND_SCAN,
@@ -117,6 +113,8 @@ enum dbs_support {
 	DISABLE_DBS_CXN_AND_ENABLE_DBS_SCAN,
 	DISABLE_DBS_CXN_AND_ENABLE_DBS_SCAN_WITH_ASYNC_SCAN_OFF,
 	ENABLE_DBS_CXN_AND_ENABLE_SCAN_WITH_ASYNC_SCAN_OFF,
+	ENABLE_DBS_CXN_AND_DISABLE_DBS_SCAN,
+	ENABLE_DBS_CXN_AND_DISABLE_SIMULTANEOUS_SCAN,
 };
 
 /*-------------------------------------------------------------------------
@@ -161,6 +159,27 @@ bool cds_is_mmie_valid(uint8_t *key, uint8_t *ipn,
 bool cds_attach_mmie(uint8_t *igtk, uint8_t *ipn, uint16_t key_id,
 		     uint8_t *frm, uint8_t *efrm, uint16_t frmLen);
 uint8_t cds_get_mmie_size(void);
+
+/**
+ * cds_is_gmac_mmie_valid: Validates GMAC MIC
+ * @igtk: integrity group temporal key
+ * @ipn: IGTK packet number
+ * @frm: IEEE 802.11 frame
+ * @efrm: End of frame
+ * @key_length: Length of IGTK
+ *
+ * Return: True if MIC validation is successful, false otherwise
+ */
+bool cds_is_gmac_mmie_valid(uint8_t *igtk, uint8_t *ipn, uint8_t *frm,
+			    uint8_t *efrm, uint16_t key_length);
+
+/**
+ * cds_get_gmac_mmie_size: Gives length of GMAC MMIE size
+ *
+ * Return: Size of MMIE for GMAC
+ */
+uint8_t cds_get_gmac_mmie_size(void);
+
 #endif /* WLAN_FEATURE_11W */
 QDF_STATUS sme_send_flush_logs_cmd_to_fw(tpAniSirGlobal pMac);
 static inline void cds_host_diag_log_work(qdf_wake_lock_t *lock, uint32_t msec,

@@ -1,8 +1,5 @@
 /*
- * Copyright (c) 2012-2017 The Linux Foundation. All rights reserved.
- *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
+ * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 /******************************************************************************
@@ -140,7 +131,7 @@ int ptt_sock_send_msg_to_app(tAniHdr *wmsg, int radio, int src_mod, int pid)
 			  __func__, radio);
 		return -EINVAL;
 	}
-	payload_len = wmsg_length + sizeof(wnl->radio) + sizeof(*wmsg);
+	payload_len = wmsg_length + sizeof(wnl->radio);
 	tot_msg_len = NLMSG_SPACE(payload_len);
 	skb = dev_alloc_skb(tot_msg_len);
 	if (skb  == NULL) {
@@ -296,18 +287,9 @@ static void ptt_cmd_handler(const void *data, int data_len, void *ctx, int pid)
 
 	payload = (struct sptt_app_reg_req *)(nla_data(tb[CLD80211_ATTR_DATA]));
 	length = be16_to_cpu(payload->wmsg.length);
-	if ((USHRT_MAX - length) < (sizeof(payload->radio) + sizeof(tAniHdr))) {
-		PTT_TRACE(QDF_TRACE_LEVEL_ERROR,
-			"u16 overflow length %d %zu %zu",
-			length,
-			sizeof(payload->radio),
-			sizeof(tAniHdr));
-		return;
-	}
 
 	if (nla_len(tb[CLD80211_ATTR_DATA]) <  (length +
-						sizeof(payload->radio) +
-						sizeof(tAniHdr))) {
+						sizeof(payload->radio))) {
 		PTT_TRACE(QDF_TRACE_LEVEL_ERROR, "ATTR_DATA len check failed");
 		return;
 	}
@@ -324,52 +306,30 @@ static void ptt_cmd_handler(const void *data, int data_len, void *ctx, int pid)
 	}
 }
 
-/**
- * ptt_sock_activate_svc() - API to register PTT/PUMAC command handler
- *
- * API to register the PTT/PUMAC command handlers. Argument @pAdapter
- * is sent for prototype compatibility between new genl and legacy
- * implementation
- *
- * Return: 0
- */
-int ptt_sock_activate_svc(void)
+void ptt_sock_activate_svc(void)
 {
 	register_cld_cmd_cb(ANI_NL_MSG_PUMAC, ptt_cmd_handler, NULL);
 	register_cld_cmd_cb(ANI_NL_MSG_PTT, ptt_cmd_handler, NULL);
-	return 0;
 }
 
-/**
- * ptt_sock_deactivate_svc() - Dummy API to deactivate PTT service
- *
- * Return: Void
- */
 void ptt_sock_deactivate_svc(void)
 {
+	deregister_cld_cmd_cb(ANI_NL_MSG_PTT);
+	deregister_cld_cmd_cb(ANI_NL_MSG_PUMAC);
 }
 #else
 
-/**
- * ptt_sock_activate_svc() - activate PTT service
- *
- * Return: 0
- */
-int ptt_sock_activate_svc(void)
+void ptt_sock_activate_svc(void)
 {
 	ptt_pid = INVALID_PID;
 	nl_srv_register(ANI_NL_MSG_PUMAC, ptt_sock_rx_nlink_msg);
 	nl_srv_register(ANI_NL_MSG_PTT, ptt_sock_rx_nlink_msg);
-	return 0;
 }
 
-/**
- * ptt_sock_deactivate_svc() - deactivate PTT service
- *
- * Return: Void
- */
 void ptt_sock_deactivate_svc(void)
 {
+	nl_srv_unregister(ANI_NL_MSG_PTT, ptt_sock_rx_nlink_msg);
+	nl_srv_unregister(ANI_NL_MSG_PUMAC, ptt_sock_rx_nlink_msg);
 	ptt_pid = INVALID_PID;
 }
 #endif
