@@ -2246,10 +2246,10 @@ static void hdd_send_re_assoc_event(struct net_device *dev,
 	chan_no = pCsrRoamInfo->pBssDesc->channelId;
 	if (chan_no <= 14)
 		freq = ieee80211_channel_to_frequency(chan_no,
-							NL80211_BAND_2GHZ);
+							IEEE80211_BAND_2GHZ);
 	else
 		freq = ieee80211_channel_to_frequency(chan_no,
-							NL80211_BAND_5GHZ);
+							IEEE80211_BAND_5GHZ);
 	chan = ieee80211_get_channel(pAdapter->wdev.wiphy, freq);
 
 	sme_roam_get_connect_profile(hal_handle, pAdapter->sessionId,
